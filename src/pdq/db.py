@@ -2,6 +2,12 @@
 
 O banco guarda apenas dados brutos (jogadores, sessões e presenças).
 Colunas derivadas da planilha (Faltas, Presenças) são recalculadas na exportação.
+
+Versões do schema (PRAGMA user_version):
+
+- 1: fundação E0 (player, session, attendance com X/F/-).
+- 2: registro pós-jogo E1 (status J, attendance.note, player.padrinho,
+     player_alias, match_meta). Migração aditiva e idempotente.
 """
 
 from __future__ import annotations
@@ -13,9 +19,14 @@ DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "pdq.db"
 
 STATUS_PRESENT = "X"
-STATUS_ABSENT = "F"
+STATUS_ABSENT = "F"  # furo: confirmou e não foi
 STATUS_NONE = "-"
-STATUSES = (STATUS_PRESENT, STATUS_ABSENT, STATUS_NONE)
+STATUS_PLAYED = "J"  # jogou: estava na reserva e entrou
+STATUSES = (STATUS_PRESENT, STATUS_ABSENT, STATUS_NONE, STATUS_PLAYED)
+# Na planilha legada só existem X/F/-; "J" conta como presença ao exportar.
+LEGACY_STATUS = {STATUS_PLAYED: STATUS_PRESENT}
+
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS player (
@@ -24,7 +35,8 @@ CREATE TABLE IF NOT EXISTS player (
     classe   TEXT    NOT NULL DEFAULT '',  -- CLASSE (M, F, -, '')
     posicao  TEXT    NOT NULL DEFAULT '',  -- POSICAO (L, G, '')
     legacy_id TEXT   NOT NULL DEFAULT '',  -- ID da planilha (não único)
-    name     TEXT    NOT NULL              -- JOGADORES (preservado byte a byte)
+    name     TEXT    NOT NULL,             -- JOGADORES (preservado byte a byte)
+    padrinho TEXT    NOT NULL DEFAULT ''   -- quem apresentou o jogador ao grupo
 );
 
 CREATE TABLE IF NOT EXISTS session (
@@ -37,11 +49,26 @@ CREATE TABLE IF NOT EXISTS session (
 CREATE TABLE IF NOT EXISTS attendance (
     player_id  INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE,
     session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-    status     TEXT NOT NULL CHECK (status IN ('X', 'F', '-')),
+    status     TEXT NOT NULL CHECK (status IN ('X', 'F', '-', 'J')),
+    note       TEXT NOT NULL DEFAULT '',   -- observação da linha da lista
     PRIMARY KEY (player_id, session_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_attendance_session ON attendance(session_id);
+
+CREATE TABLE IF NOT EXISTS player_alias (
+    alias     TEXT    PRIMARY KEY,         -- normalizado (ver pdq.aliases.normalize)
+    player_id INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_player_alias_player ON player_alias(player_id);
+
+CREATE TABLE IF NOT EXISTS match_meta (
+    session_id   INTEGER PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+    vagas_vazias INTEGER NOT NULL DEFAULT 0,
+    observacao   TEXT    NOT NULL DEFAULT '',
+    raw_list     TEXT    NOT NULL DEFAULT ''  -- texto colado do WhatsApp
+);
 """
 
 
@@ -58,14 +85,74 @@ def connect(path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Cria as tabelas. Idempotente."""
+    """Cria as tabelas e aplica migrações pendentes. Idempotente."""
     conn.executescript(SCHEMA)
+    migrate(conn)
     conn.commit()
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _table_sql(conn: sqlite3.Connection, table: str) -> str:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    return row[0] if row else ""
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Leva um banco da versão 1 (E0) para a versão 2 (E1) sem perder dados."""
+    if schema_version(conn) >= SCHEMA_VERSION and "'J'" in _table_sql(conn, "attendance"):
+        return
+
+    if "padrinho" not in _columns(conn, "player"):
+        conn.execute("ALTER TABLE player ADD COLUMN padrinho TEXT NOT NULL DEFAULT ''")
+
+    if "'J'" not in _table_sql(conn, "attendance") or "note" not in _columns(conn, "attendance"):
+        # SQLite não altera CHECK: recria a tabela copiando os dados.
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.executescript(
+            """
+            CREATE TABLE attendance_new (
+                player_id  INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE,
+                session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+                status     TEXT NOT NULL CHECK (status IN ('X', 'F', '-', 'J')),
+                note       TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (player_id, session_id)
+            );
+            INSERT INTO attendance_new (player_id, session_id, status)
+                SELECT player_id, session_id, status FROM attendance;
+            DROP TABLE attendance;
+            ALTER TABLE attendance_new RENAME TO attendance;
+            CREATE INDEX IF NOT EXISTS idx_attendance_session ON attendance(session_id);
+            """
+        )
+        conn.execute("PRAGMA foreign_keys = ON")
+
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def clear_all(conn: sqlite3.Connection) -> None:
     """Remove todos os dados (usado por importações completas)."""
+    conn.execute("DELETE FROM match_meta")
+    conn.execute("DELETE FROM player_alias")
     conn.execute("DELETE FROM attendance")
     conn.execute("DELETE FROM session")
     conn.execute("DELETE FROM player")
     conn.commit()
+
+
+def renumber_sessions(conn: sqlite3.Connection) -> None:
+    """Recalcula `ordem` (1 = data mais recente) após inserir uma sessão."""
+    ids = [r["id"] for r in conn.execute("SELECT id FROM session ORDER BY date DESC, id DESC")]
+    # UNIQUE(ordem) impede renumerar em um único UPDATE; passa pelo negativo.
+    conn.execute("UPDATE session SET ordem = -ordem")
+    conn.executemany(
+        "UPDATE session SET ordem = ? WHERE id = ?", [(i, sid) for i, sid in enumerate(ids, 1)]
+    )

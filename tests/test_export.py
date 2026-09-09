@@ -57,3 +57,24 @@ def test_cli_export_to_file(imported_db, tmp_path, legacy_csv):
     )
     assert proc.returncode == 0, proc.stderr
     assert out.read_bytes() == legacy_csv.read_bytes()
+
+
+def test_export_counts_jogou_as_presence(imported_db):
+    conn, _ = imported_db
+    before = exporter.build_rows(conn)
+    # escolhe um jogador sem registro ("-") na sessão mais antiga e marca "J" (reserva que jogou)
+    sid = conn.execute("SELECT id FROM session ORDER BY ordem DESC LIMIT 1").fetchone()[0]
+    row = conn.execute(
+        "SELECT p.id, p.pos FROM attendance a JOIN player p ON p.id = a.player_id "
+        "WHERE a.session_id = ? AND a.status = '-' ORDER BY p.pos LIMIT 1",
+        (sid,),
+    ).fetchone()
+    conn.execute(
+        "UPDATE attendance SET status='J' WHERE player_id=? AND session_id=?", (row["id"], sid)
+    )
+    after = exporter.build_rows(conn)
+    line = 5 + row["pos"] - 1
+    assert before[line][-1] == "-" and after[line][-1] == "X"
+    assert int(after[line][6]) == int(before[line][6]) + 1  # Presenças do jogador
+    assert int(after[3][-1]) == int(before[3][-1]) + 1  # Presencas da sessão
+    assert "J" not in {c for r in after for c in r}
