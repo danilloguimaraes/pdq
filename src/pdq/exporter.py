@@ -6,7 +6,7 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
-from pdq import legacy
+from pdq import db, legacy
 from pdq.legacy import (
     COLUMN_HEADER,
     FIXED_COLUMNS,
@@ -47,6 +47,7 @@ def build_rows(conn: sqlite3.Connection, *, strict_legacy_quirk: bool = False) -
         faltas = presencas = 0
         for j, s in enumerate(sessions):
             status = att.get((p["id"], s["id"]), "-")
+            status = db.LEGACY_STATUS.get(status, status)  # "J" (jogou) vira "X"
             cells.append(status)
             if status == "F":
                 faltas += 1
