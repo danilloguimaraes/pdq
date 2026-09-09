@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Dados locais (fonte de verdade fica em data/, nunca no git)
+data/*
+!data/.gitkeep
+!data/photos/
+data/photos/*
+!data/photos/.gitkeep
+
+# Backups datados
+backups/
