@@ -63,6 +63,12 @@ def test_exact_refuses_ambiguity(resolver):
     assert resolver.exact("Ninguém") is None
 
 
+def test_canonical_requires_a_unique_normalized_player_name(resolver):
+    assert resolver.canonical("André Tomé") == 7
+    assert resolver.canonical("Zé Vitor") is None  # só existe como alias
+    assert Resolver({1: "GUSTAVO", 2: "Gustavo"}).canonical("Gustavo") is None
+
+
 def test_suggest_ranks_by_similarity(resolver):
     s = resolver.suggest("Gustavo")
     assert [x.player_id for x in s] == [2, 5]  # empate: ordem de cadastro

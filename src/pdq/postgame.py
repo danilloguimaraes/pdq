@@ -269,6 +269,7 @@ def confirm(conn: sqlite3.Connection, proposal: Proposal) -> ConfirmResult:
     learned: list[str] = []
     rows = 0
     with conn:
+        padrinho_resolver = aliases.Resolver.from_db(conn)
         cur = conn.execute(
             "INSERT INTO session (ordem, date, venue) VALUES "
             "((SELECT COALESCE(MAX(ordem), 0) + 1 FROM session), ?, ?)",
@@ -288,14 +289,15 @@ def confirm(conn: sqlite3.Connection, proposal: Proposal) -> ConfirmResult:
                 np = e.new_player
                 cur = conn.execute(
                     "INSERT INTO player "
-                    "(pos, classe, posicao, legacy_id, name, padrinho, guest_status) VALUES "
-                    "((SELECT COALESCE(MAX(pos), 0) + 1 FROM player), ?, ?, ?, ?, ?, ?)",
+                    "(pos, classe, posicao, legacy_id, name, padrinho, padrinho_id, guest_status) "
+                    "VALUES ((SELECT COALESCE(MAX(pos), 0) + 1 FROM player), ?, ?, ?, ?, ?, ?, ?)",
                     (
                         db.CLASS_GUEST,
                         np.posicao,
                         d.strftime("%y%m"),
                         np.name.strip(),
                         np.padrinho.strip(),
+                        padrinho_resolver.canonical(np.padrinho),
                         db.GUEST_PENDING,
                     ),
                 )
@@ -308,6 +310,13 @@ def confirm(conn: sqlite3.Connection, proposal: Proposal) -> ConfirmResult:
                         "UPDATE player SET padrinho = ? WHERE id = ? AND padrinho = ''",
                         (e.padrinho, pid),
                     )
+                    padrinho_id = padrinho_resolver.canonical(e.padrinho)
+                    if padrinho_id is not None and padrinho_id != pid:
+                        conn.execute(
+                            "UPDATE player SET padrinho_id = ? "
+                            "WHERE id = ? AND padrinho_id IS NULL",
+                            (padrinho_id, pid),
+                        )
             conn.execute(
                 "INSERT INTO attendance (player_id, session_id, status, note, section) "
                 "VALUES (?, ?, ?, ?, ?)",
