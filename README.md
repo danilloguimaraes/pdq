@@ -166,7 +166,11 @@ esse comportamento e gera bytes idênticos ao original; sem a flag, apenas as
   `F` (furo), `J` (reserva que jogou; exportado como `X`), `-` (sem registro / listado que
   não jogou); imposto por `CHECK`. `note` guarda a observação da linha da lista e `section`
   a seção (`goleiros`, `linha`, `reservas`; vazia nas linhas importadas da planilha).
-- `player.padrinho`: quem apresentou o jogador (texto da lista).
+- `player.padrinho`: texto histórico de quem apresentou o jogador, preservado como foi informado.
+- `player.padrinho_id`: vínculo estruturado ao jogador padrinho, quando a referência normalizada
+  corresponde a exatamente um nome canônico. A higiene E3 reconhece sufixos legados como
+  `(BRUNO)`, `AMIGO BRUNO` e `CONVIDADO BRUNO`; referências ausentes ou ambíguas ficam pendentes
+  para decisão manual e não alteram o vínculo.
 - `player_alias(alias, player_id)`: apelidos normalizados (sem acento/caixa/pontuação)
   aprendidos nas confirmações.
 - `match_meta(session_id, vagas_vazias, observacao, raw_list)`: dados da lista que não

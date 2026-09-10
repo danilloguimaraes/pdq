@@ -101,6 +101,17 @@ class Resolver:
             return next(iter(ids))
         return None
 
+    def canonical(self, name: str) -> int | None:
+        """Retorna um jogador apenas para seu nome canônico normalizado e único."""
+        ids = self.canonical_candidates(name)
+        return next(iter(ids)) if len(ids) == 1 else None
+
+    def canonical_candidates(self, name: str) -> set[int]:
+        """Jogadores cujo nome canônico tem a mesma normalização, sem aliases."""
+        key = normalize(name)
+        ids = self._exact.get(key, ())
+        return set(ids) if key else set()
+
     def suggest(self, name: str) -> list[Suggestion]:
         query = core(name) or normalize(name)
         if not query:

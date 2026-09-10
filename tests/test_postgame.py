@@ -229,11 +229,19 @@ def test_confirm_creates_new_player_with_editable_name_and_padrinho(conn):
     assert res.created_players == ["JOAO PEDRO (CONVIDADO DANILLO)", "PEDRÃO"]
     rows = conn.execute("SELECT * FROM player WHERE pos > 13 ORDER BY pos").fetchall()
     assert [
-        (r["pos"], r["name"], r["classe"], r["padrinho"], r["posicao"], r["legacy_id"])
+        (
+            r["pos"],
+            r["name"],
+            r["classe"],
+            r["padrinho"],
+            r["padrinho_id"],
+            r["posicao"],
+            r["legacy_id"],
+        )
         for r in rows
     ] == [
-        (14, "JOAO PEDRO (CONVIDADO DANILLO)", "C", "Danillo", "L", "2509"),
-        (15, "PEDRÃO", "C", "Rodrigo", "L", "2509"),
+        (14, "JOAO PEDRO (CONVIDADO DANILLO)", "C", "Danillo", 2, "L", "2509"),
+        (15, "PEDRÃO", "C", "Rodrigo", 1, "L", "2509"),
     ]
     # apelido escrito na lista aprendido para o jogador novo
     assert aliases.Resolver.from_db(conn).exact("Joãozinho") == rows[0]["id"]
@@ -258,7 +266,23 @@ def test_confirm_link_after_review_learns_alias(conn):
 def test_confirm_sets_padrinho_of_existing_player_if_empty(conn):
     p = postgame.build_proposal(conn, "Pdq 05/09\n1. Laion (padrinho: Rodrigo)", today=TODAY)
     postgame.confirm(conn, p)
-    assert conn.execute("SELECT padrinho FROM player WHERE name='LAION'").fetchone()[0] == "Rodrigo"
+    assert tuple(
+        conn.execute("SELECT padrinho, padrinho_id FROM player WHERE name='LAION'").fetchone()
+    ) == (
+        "Rodrigo",
+        1,
+    )
+
+
+@pytest.mark.parametrize("padrinho", ["André Tomé", "Ninguém", "Gustavo"])
+def test_confirm_keeps_text_and_links_only_unique_canonical_padrinho(conn, padrinho):
+    p = postgame.build_proposal(conn, f"Pdq 05/09\n1. Laion (padrinho: {padrinho})", today=TODAY)
+    postgame.confirm(conn, p)
+    text, padrinho_id = conn.execute(
+        "SELECT padrinho, padrinho_id FROM player WHERE name='LAION'"
+    ).fetchone()
+    assert text == padrinho
+    assert padrinho_id == (11 if padrinho == "André Tomé" else None)
 
 
 def test_confirm_refuses_pending_and_writes_nothing(conn):
