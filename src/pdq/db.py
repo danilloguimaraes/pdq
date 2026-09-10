@@ -11,14 +11,17 @@ Versões do schema (PRAGMA user_version):
 - 3: correção de partida E2 (attendance.section: seção da lista em que o
      jogador estava). Aditiva; linhas antigas ficam com seção vazia.
 - 4: financeiro E4 (tabela payment) e ciclo de vida E5 (classe C,
-     player.guest_status e guest_decision_date). Aditiva e idempotente; a
-     guarda de migração verifica as duas épicas, pois foram desenvolvidas em
-     paralelo sob o mesmo número.
+      player.guest_status e guest_decision_date). Aditiva e idempotente; a
+      guarda de migração verifica as duas épicas, pois foram desenvolvidas em
+      paralelo sob o mesmo número.
+- 5: identidade canônica (player.canonical_player_id). A auto-referência é
+      opcional e preserva os registros originais de player e attendance.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_DATA_DIR = Path("data")
@@ -37,7 +40,7 @@ SECTION_FIELD = "linha"
 SECTION_RESERVES = "reservas"
 SECTIONS = (SECTION_GOALKEEPERS, SECTION_FIELD, SECTION_RESERVES)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 CLASS_GUEST = "C"
 CLASS_FREQUENT = "F"
@@ -65,7 +68,8 @@ CREATE TABLE IF NOT EXISTS player (
     padrinho TEXT    NOT NULL DEFAULT '',  -- quem apresentou o jogador ao grupo
     guest_status TEXT NOT NULL DEFAULT '' CHECK (guest_status IN
         ('', 'pending', 'promoted', 'declined_stays', 'declined_leaves')),
-    guest_decision_date TEXT NOT NULL DEFAULT ''
+    guest_decision_date TEXT NOT NULL DEFAULT '',
+    canonical_player_id INTEGER REFERENCES player(id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS session (
@@ -147,6 +151,70 @@ def _table_sql(conn: sqlite3.Connection, table: str) -> str:
     return row[0] if row else ""
 
 
+@dataclass(frozen=True)
+class CanonicalIdentity:
+    """Resultado seguro da resolução da identidade canônica de um jogador.
+
+    `chain` inclui o jogador consultado e cada alvo seguido. Em caso de ciclo,
+    o jogador que fecha o ciclo aparece novamente no fim da cadeia.
+    """
+
+    player_id: int
+    canonical_player_id: int | None
+    chain: tuple[int, ...]
+    issue: str | None = None
+
+    @property
+    def resolved(self) -> bool:
+        """Se a referência termina em uma identidade canônica válida."""
+        return self.issue is None
+
+
+def resolve_canonical_player(conn: sqlite3.Connection, player_id: int) -> CanonicalIdentity:
+    """Resolve a identidade canônica sem seguir ciclos ou referências inválidas.
+
+    Uma identidade sem mesclagem resolve para ela mesma. `issue` é
+    `self_reference`, `cycle` ou `invalid_reference` quando a cadeia é inválida.
+    """
+    chain: list[int] = []
+    seen: set[int] = set()
+    current = player_id
+
+    while True:
+        row = conn.execute(
+            "SELECT canonical_player_id FROM player WHERE id = ?", (current,)
+        ).fetchone()
+        if row is None:
+            return CanonicalIdentity(player_id, None, tuple(chain + [current]), "invalid_reference")
+
+        chain.append(current)
+        target = row["canonical_player_id"]
+        if target is None:
+            return CanonicalIdentity(player_id, current, tuple(chain))
+        if target == current:
+            return CanonicalIdentity(player_id, None, tuple(chain + [target]), "self_reference")
+        if target in seen or target in chain:
+            return CanonicalIdentity(player_id, None, tuple(chain + [target]), "cycle")
+
+        seen.add(current)
+        current = target
+
+
+def canonical_player_id(conn: sqlite3.Connection, player_id: int) -> int | None:
+    """Retorna o alvo canônico, ou `None` se a identidade não for resolvível."""
+    return resolve_canonical_player(conn, player_id).canonical_player_id
+
+
+def identity_diagnostics(conn: sqlite3.Connection) -> list[CanonicalIdentity]:
+    """Lista jogadores com referências canônicas, incluindo cadeias e problemas."""
+    return [
+        resolve_canonical_player(conn, row["id"])
+        for row in conn.execute(
+            "SELECT id FROM player WHERE canonical_player_id IS NOT NULL ORDER BY id"
+        )
+    ]
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     """Leva bancos de versões anteriores ao schema atual sem perder dados."""
     if (
@@ -155,6 +223,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         and "section" in _columns(conn, "attendance")
         and _table_sql(conn, "payment")
         and {"guest_status", "guest_decision_date"} <= _columns(conn, "player")
+        and "canonical_player_id" in _columns(conn, "player")
     ):
         return
 
@@ -195,6 +264,11 @@ def migrate(conn: sqlite3.Connection) -> None:
         )
     if "guest_decision_date" not in _columns(conn, "player"):
         conn.execute("ALTER TABLE player ADD COLUMN guest_decision_date TEXT NOT NULL DEFAULT ''")
+    if "canonical_player_id" not in _columns(conn, "player"):
+        conn.execute(
+            "ALTER TABLE player ADD COLUMN canonical_player_id "
+            "INTEGER REFERENCES player(id) ON DELETE RESTRICT"
+        )
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 

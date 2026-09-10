@@ -93,11 +93,17 @@ data (`set-date`, renumera) e local (`set-venue`), ou excluir (`delete-session`,
 exige confirmação explícita). Nunca altera o layout do export legado.
 _Evitar_: "editar no SQL", "ajuste manual".
 
+**Identidade canônica** (`player.canonical_player_id`):
+Referência opcional para outro jogador que representa a mesma pessoa após uma
+mesclagem. O jogador e suas presenças originais são preservados; consultas
+seguras resolvem o alvo e reportam cadeia, ciclo, autorreferência ou referência
+inválida.
+
 **Migração aditiva**:
 Evolução do schema que preserva dados e o comportamento do export legado,
 versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4 + E5,
 desenvolvidas em paralelo; a guarda de migração verifica `payment` e
-`player.guest_status`).
+`player.guest_status`; 5 = identidade canônica).
 
 **Classe** (`player.classe`):
 Como o jogador se relaciona com o Pdq, herdada da coluna CLASSE da planilha:
