@@ -31,6 +31,7 @@ python -m pdq --help
 | `pdq promote-guest JOGADOR {F,M} DATA` | promove convidado pendente com a data da decisão |
 | `pdq decline-guest JOGADOR DATA {--keep-guest,--leaves}` | registra recusa mantendo o convidado ou sua saída |
 | `pdq show-session DATA` | mostra uma partida gravada e suas presenças |
+| `pdq merge ORIGEM CANONICO` | mescla uma linha legada em uma identidade canônica |
 | `pdq relink DATA ERRADO CERTO [--alias GRAFIA]` | troca o jogador vinculado a uma presença |
 | `pdq set-status DATA JOGADOR {X,F,J,-}` | alterna presença / furo / jogou / não jogou |
 | `pdq set-section DATA JOGADOR {goleiros,linha,reservas}` | corrige a seção da lista |
@@ -112,6 +113,7 @@ por id, nome exato ou alias aprendido.
 
 ```sh
 python -m pdq show-session 2025-09-04
+python -m pdq merge 42 17                            # linha legada 42 passa a resolver para a identidade 17
 python -m pdq relink 2025-09-04 'Gustavo Bastos' 'Gustavo Oliveira' --alias Gustavo
 python -m pdq set-status 2025-09-04 Danillo X        # F -> X
 python -m pdq set-status 2025-09-04 Saulo -          # reserva listado que não jogou
@@ -122,7 +124,10 @@ python -m pdq delete-session 2025-09-05              # mostra e sai com 1
 python -m pdq delete-session 2025-09-05 --yes        # exclui presenças e match_meta; jogadores ficam
 ```
 
-`relink` preserva status, seção e observação da linha; com `--alias`, a grafia da
+`merge` exige `player_id` explícitos e preserva as presenças e os campos de
+exportação da linha legada de origem; seus aliases passam a resolver para a
+identidade canônica. O resultado informa jogadores, presenças preservadas e aliases
+consolidados para auditoria. `relink` preserva status, seção e observação da linha; com `--alias`, a grafia da
 lista passa a apontar para o jogador certo nas próximas propostas. O status `-`
 mantém a linha (o jogador estava na lista) mas é "sem registro" na planilha, e a
 seção não é exportada: o export legado continua byte a byte.
