@@ -11,6 +11,25 @@ def test_export_strict_quirk_is_byte_identical(imported_db, legacy_csv):
     assert exported == legacy_csv.read_bytes()
 
 
+def test_export_strict_uses_preserved_legacy_fields_only(imported_db, legacy_csv):
+    conn, _ = imported_db
+    before = exporter.export_legacy_csv(conn, strict_legacy_quirk=True)
+
+    # Metadados pós-legado não podem higienizar nem alterar a matriz exportada.
+    conn.execute(
+        "UPDATE player SET padrinho = 'Identidade canônica', "
+        "guest_status = 'declined_stays', guest_decision_date = '2025-09-09' "
+        "WHERE pos = 1"
+    )
+    conn.execute(
+        "UPDATE attendance SET note = 'alias resolvido', section = 'reservas' "
+        "WHERE player_id = (SELECT id FROM player WHERE pos = 1)"
+    )
+
+    assert exporter.export_legacy_csv(conn, strict_legacy_quirk=True) == before
+    assert before == legacy_csv.read_bytes()
+
+
 def test_export_recomputed_differs_only_in_stale_presencas(imported_db, legacy_csv):
     conn, _ = imported_db
     original = legacy.read_rows(legacy_csv)

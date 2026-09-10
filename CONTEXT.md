@@ -22,6 +22,18 @@ _Evitar_: "jogo", "rodada" no código.
 Pessoa cadastrada. `name` é preservado literalmente como na planilha;
 `legacy_id` é `AAMM` da primeira partida; `padrinho` é quem o apresentou.
 
+**Linha legada** (`player`):
+Registro que representa uma linha preservada da planilha. Seus campos de
+exportação (`pos`, `classe`, `posicao`, `legacy_id`, `name`) e suas presenças não
+são reescritos por higiene de identidade. A exportação lê sempre essa linha, não a
+identidade canônica.
+
+**Identidade canônica** (`player.canonical_player_id`):
+Referência opcional para outro jogador que representa a mesma pessoa após uma
+mesclagem. A linha legada e seu histórico continuam preservados; aliases,
+sugestões e financeiro resolvem o jogador canônico. A resolução é segura e
+diagnostica cadeia, ciclo, autorreferência ou referência inválida.
+
 **Convidado** (`player.classe = C`, ou `-`/vazio herdado da planilha):
 Quem joga esporadicamente, em geral trazido por um padrinho. Jogadores criados
 pela confirmação nascem com classe `C` e, após a quarta presença (status `X` ou
@@ -67,7 +79,8 @@ Texto livre anexo a uma linha (`- obs: chega tarde`). Vai para `attendance.note`
 **Alias**:
 Forma como um nome foi escrito na lista, normalizada por `aliases.normalize`
 (sem acentos, caixa ou pontuação). `player_alias` guarda os aliases aprendidos
-em confirmações e permite o **vínculo exato** na próxima lista.
+em confirmações e permite o **vínculo exato** na próxima lista. O vínculo é
+resolvido para a identidade canônica, sem alterar a grafia ou a linha legada.
 
 **Sugestão**:
 Candidato a vínculo por similaridade (`difflib`) quando não há alias exato.
@@ -97,7 +110,7 @@ _Evitar_: "editar no SQL", "ajuste manual".
 Evolução do schema que preserva dados e o comportamento do export legado,
 versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4 + E5,
 desenvolvidas em paralelo; a guarda de migração verifica `payment` e
-`player.guest_status`).
+`player.guest_status`; 5 = identidade canônica).
 
 **Classe** (`player.classe`):
 Como o jogador se relaciona com o Pdq, herdada da coluna CLASSE da planilha:
@@ -123,7 +136,8 @@ mensalista em todo mês com partida, a partir do mês do seu primeiro registro
 **Cobrança** (`Charge`):
 Diária ou mensalidade devida por um jogador. Não é gravada: é derivada de
 presença + classe a cada consulta (`finance.all_charges`), então corrigir uma
-presença corrige a cobrança.
+presença corrige a cobrança. A cobrança é atribuída ao jogador canônico; linhas
+legadas mescladas não dividem saldo nem pagamento.
 _Evitar_: "débito", "fatura".
 
 **Pagamento** (`payment`):
