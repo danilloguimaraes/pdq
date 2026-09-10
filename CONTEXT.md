@@ -74,7 +74,55 @@ aliases. Recusa pendências e datas já registradas.
 
 **Migração aditiva**:
 Evolução do schema que preserva dados e o comportamento do export legado,
-versionada por `PRAGMA user_version` (1 = E0, 2 = E1).
+versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E4).
+
+**Classe** (`player.classe`):
+Como o jogador se relaciona com o Pdq, herdada da coluna CLASSE da planilha:
+`M` mensalista, `F` frequente, `-` ou vazio convidado. É o estado atual, não
+versionado: a cobrança deriva sempre da classe de hoje.
+
+**Mensalista** (classe `M`):
+Paga **mensalidade** por mês com partida, jogue ou não. Nunca paga diária.
+
+**Frequente** (classe `F`):
+Jogador habitual sem mensalidade. Paga **diária** quando joga (X ou J).
+
+**Convidado** (classe `-` ou vazia):
+Quem joga esporadicamente, em geral trazido por um padrinho. Paga diária quando
+joga; a diária é dele, não do padrinho (ADR 0001). O padrinho aparece na
+cobrança apenas como referência.
+
+**Diária** (`Charge` com `kind="diaria"`):
+R$ 15 devidos por partida por frequente ou convidado presente (X ou J). Furo
+(`F`) não gera diária. Referência (`ref`): a data da partida.
+
+**Mensalidade** (`Charge` com `kind="mensalidade"`):
+Valor fixo por mês (padrão R$ 60, ajustável com `--mensalidade`) devido por
+mensalista em todo mês com partida, a partir do mês do seu primeiro registro
+(X/F/J). Referência (`ref`): `AAAA-MM`.
+
+**Cobrança** (`Charge`):
+Diária ou mensalidade devida por um jogador. Não é gravada: é derivada de
+presença + classe a cada consulta (`finance.all_charges`), então corrigir uma
+presença corrige a cobrança.
+_Evitar_: "débito", "fatura".
+
+**Pagamento** (`payment`):
+Valor efetivamente recebido de um jogador, em centavos, com data (`paid_on`) e
+referência opcional (`ref`: partida ou mês). É a única informação financeira
+gravada. Registrado por `pdq pay`.
+
+**Saldo** (`Balance`):
+Cobrado − pago por jogador. Positivo é **pendência**, negativo é **crédito**,
+zero é quitado. Sempre em nome do próprio jogador (o padrinho não herda saldo).
+
+**Pendência**:
+Saldo positivo: o que o jogador ainda deve. `pdq balance` lista só quem tem
+pendência; `--all` inclui quitados e créditos.
+
+**Início da contabilidade** (`--since AAAA-MM`):
+Mês a partir do qual as cobranças são consideradas; o que vem antes é
+histórico de presença sem efeito financeiro.
 
 ## Módulos
 
@@ -86,4 +134,11 @@ versionada por `PRAGMA user_version` (1 = E0, 2 = E1).
 | `pdq.whatsapp` | parser puro da lista (sem banco) |
 | `pdq.aliases` | normalização, vínculo exato, sugestões, aprendizado |
 | `pdq.postgame` | proposta, JSON, validação e confirmação |
-| `pdq.__main__` | CLI (`propose`, `confirm`, ...) |
+| `pdq.finance` | cobranças derivadas (diária, mensalidade), pagamentos e saldo |
+| `pdq.__main__` | CLI (`propose`, `confirm`, `charges`, `pay`, `balance`, ...) |
+
+## Decisões
+
+| ADR | Decisão |
+|-----|---------|
+| [0001](docs/adr/0001-diaria-do-convidado.md) | A diária do convidado recai sobre o convidado; padrinho é referência |

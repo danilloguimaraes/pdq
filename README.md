@@ -27,6 +27,9 @@ python -m pdq --help
 | `pdq verify-backup [DIR]` | confere a integridade de um backup |
 | `pdq propose LISTA [-o ARQ] [--date] [--venue]` | lê a lista do WhatsApp e gera a proposta de presenças (JSON) |
 | `pdq confirm PROPOSTA [--dry-run]` | grava a partida a partir da proposta revisada |
+| `pdq charges [--date] [--month] [--all] [--since] [--mensalidade]` | cobranças da partida (diárias) e do mês (mensalidades) |
+| `pdq pay JOGADOR VALOR [--on] [--ref] [--note]` | registra um pagamento |
+| `pdq balance [JOGADOR] [--all] [--since] [--mensalidade]` | pendências, ou saldo detalhado de um jogador |
 
 `scripts/backup.sh` é um atalho para `pdq backup`.
 
@@ -75,6 +78,29 @@ sessão, `match_meta` (vagas vazias, texto original), presenças com observaçã
 jogadores novos (`legacy_id` = AAMM da partida) e aliases aprendidos, que fazem a
 próxima lista casar sozinha.
 
+## Financeiro
+
+As cobranças não são gravadas: são derivadas de presença + classe a cada consulta.
+Só os pagamentos entram no banco (`payment`).
+
+| Classe | Quem | Cobrança |
+|--------|------|----------|
+| `M` mensalista | paga por mês | mensalidade em todo mês com partida (padrão R$ 60, `--mensalidade`) |
+| `F` frequente | habitual sem mensalidade | diária R$ 15 por partida em que jogou (`X`/`J`) |
+| `-`/vazio convidado | esporádico, trazido por padrinho | diária R$ 15; a dívida é do convidado, o padrinho sai como referência ([ADR 0001](docs/adr/0001-diaria-do-convidado.md)) |
+
+```sh
+python -m pdq charges                              # diárias da última partida + mensalidades do mês
+python -m pdq pay zico 15 --ref 2025-09-04 --note pix
+python -m pdq pay Rodrigo 60 --ref 2025-09
+python -m pdq balance                              # quem ainda deve
+python -m pdq balance Rodrigo                      # cobranças e pagamentos dele
+```
+
+`JOGADOR` aceita id, nome da planilha ou alias aprendido. Como a planilha legada
+traz anos de histórico, use `--since AAAA-MM` para começar a contabilidade num mês
+(cobranças anteriores são ignoradas). Saldo positivo é pendência, negativo é crédito.
+
 ## Exportação e a inconsistência da planilha
 
 A planilha original tem a fórmula de Presenças por jogador desatualizada
@@ -95,9 +121,11 @@ esse comportamento e gera bytes idênticos ao original; sem a flag, apenas as
   aprendidos nas confirmações.
 - `match_meta(session_id, vagas_vazias, observacao, raw_list)`: dados da lista que não
   cabem na planilha.
+- `payment(player_id, amount_cents, paid_on, ref, note)`: pagamentos recebidos, em centavos;
+  `ref` é a partida (`AAAA-MM-DD`) ou o mês (`AAAA-MM`) a que se refere.
 
 Faltas e Presenças (por jogador e por sessão) são derivados e recalculados na exportação.
-O schema é versionado por `PRAGMA user_version`; bancos da E0 (versão 1) são migrados
+O schema é versionado por `PRAGMA user_version`; bancos anteriores (versões 1 e 2) são migrados
 automaticamente ao abrir, sem perda de dados. Consulte `CONTEXT.md` para o vocabulário.
 
 ## Desenvolvimento

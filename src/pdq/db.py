@@ -8,6 +8,7 @@ Versões do schema (PRAGMA user_version):
 - 1: fundação E0 (player, session, attendance com X/F/-).
 - 2: registro pós-jogo E1 (status J, attendance.note, player.padrinho,
      player_alias, match_meta). Migração aditiva e idempotente.
+- 3: financeiro E4 (tabela payment). Migração aditiva e idempotente.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ STATUSES = (STATUS_PRESENT, STATUS_ABSENT, STATUS_NONE, STATUS_PLAYED)
 # Na planilha legada só existem X/F/-; "J" conta como presença ao exportar.
 LEGACY_STATUS = {STATUS_PLAYED: STATUS_PRESENT}
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS player (
@@ -69,6 +70,17 @@ CREATE TABLE IF NOT EXISTS match_meta (
     observacao   TEXT    NOT NULL DEFAULT '',
     raw_list     TEXT    NOT NULL DEFAULT ''  -- texto colado do WhatsApp
 );
+
+CREATE TABLE IF NOT EXISTS payment (
+    id           INTEGER PRIMARY KEY,
+    player_id    INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),  -- valor em centavos
+    paid_on      TEXT    NOT NULL,             -- ISO 8601 (YYYY-MM-DD)
+    ref          TEXT    NOT NULL DEFAULT '',  -- a que se refere: AAAA-MM-DD, AAAA-MM ou ''
+    note         TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_player ON payment(player_id);
 """
 
 
@@ -107,9 +119,11 @@ def _table_sql(conn: sqlite3.Connection, table: str) -> str:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Leva um banco da versão 1 (E0) para a versão 2 (E1) sem perder dados."""
+    """Leva um banco das versões 1 (E0) ou 2 (E1) para a versão 3 (E4) sem perder dados."""
     if schema_version(conn) >= SCHEMA_VERSION and "'J'" in _table_sql(conn, "attendance"):
         return
+
+    # E4: a tabela payment já foi criada por SCHEMA (CREATE TABLE IF NOT EXISTS).
 
     if "padrinho" not in _columns(conn, "player"):
         conn.execute("ALTER TABLE player ADD COLUMN padrinho TEXT NOT NULL DEFAULT ''")
@@ -140,6 +154,7 @@ def migrate(conn: sqlite3.Connection) -> None:
 
 def clear_all(conn: sqlite3.Connection) -> None:
     """Remove todos os dados (usado por importações completas)."""
+    conn.execute("DELETE FROM payment")
     conn.execute("DELETE FROM match_meta")
     conn.execute("DELETE FROM player_alias")
     conn.execute("DELETE FROM attendance")

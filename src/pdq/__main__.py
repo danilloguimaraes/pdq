@@ -4,15 +4,27 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date
 from pathlib import Path
 
-from pdq import __version__, backup, db, exporter, importer, postgame, validate
+from pdq import __version__, backup, db, exporter, finance, importer, postgame, validate
 
 LEGACY_CSV_DEFAULT = "legacy/Pdq - Frequencia - Historico.csv"
 
 
 def _add_db_arg(p: argparse.ArgumentParser) -> None:
     p.add_argument("--db", default=str(db.DEFAULT_DB_PATH), help="caminho do banco SQLite")
+
+
+def _add_finance_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--mensalidade",
+        default=finance.fmt_brl(finance.MENSALIDADE_CENTAVOS).removeprefix("R$ "),
+        help="valor da mensalidade (padrão: %(default)s)",
+    )
+    p.add_argument(
+        "--since", metavar="AAAA-MM", help="início da contabilidade: ignora cobranças anteriores"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,6 +93,46 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--dry-run", action="store_true", help="só valida e mostra o resumo; não grava nada"
     )
+    _add_db_arg(p)
+
+    p = sub.add_parser(
+        "charges",
+        help="lista as cobranças de uma partida (diárias) e do mês (mensalidades)",
+        description=(
+            "Deriva as cobranças de presença + classe: diária de R$ 15 para frequentes e "
+            "convidados que jogaram (X/J) e mensalidade para mensalistas no mês. A diária do "
+            "convidado é dele; o padrinho aparece como referência (ADR 0001)."
+        ),
+    )
+    p.add_argument("--date", help="data da partida AAAA-MM-DD (padrão: a mais recente)")
+    p.add_argument("--month", help="mês AAAA-MM das mensalidades (padrão: o mês da partida)")
+    p.add_argument("--all", action="store_true", help="todas as cobranças do histórico")
+    _add_finance_args(p)
+    _add_db_arg(p)
+
+    p = sub.add_parser(
+        "pay",
+        help="registra um pagamento de um jogador",
+        description="JOGADOR pode ser o id, o nome da planilha ou um alias aprendido.",
+    )
+    p.add_argument("jogador", help="id, nome ou alias do jogador")
+    p.add_argument("valor", help="valor pago (15 ou 15,50)")
+    p.add_argument("--on", dest="paid_on", help="data do pagamento AAAA-MM-DD (padrão: hoje)")
+    p.add_argument("--ref", default="", help="a que se refere: partida AAAA-MM-DD ou mês AAAA-MM")
+    p.add_argument("--note", default="", help="observação (pix, dinheiro, ...)")
+    _add_db_arg(p)
+
+    p = sub.add_parser(
+        "balance",
+        help="saldo por jogador: cobrado, pago e pendência",
+        description=(
+            "Sem JOGADOR lista quem tem pendência (saldo positivo); com --all inclui quitados "
+            "e créditos. Com JOGADOR detalha cobranças e pagamentos dele."
+        ),
+    )
+    p.add_argument("jogador", nargs="?", help="id, nome ou alias do jogador")
+    p.add_argument("--all", action="store_true", help="inclui quem está quitado ou com crédito")
+    _add_finance_args(p)
     _add_db_arg(p)
     return parser
 
@@ -220,6 +272,131 @@ def cmd_confirm(args) -> int:
     return 0
 
 
+def _charge_line(c: finance.Charge) -> str:
+    kind = "diária" if c.kind == finance.KIND_DIARIA else "mensalidade"
+    valor = finance.fmt_brl(c.amount_cents)
+    line = f"  {c.player_name:<30} {finance.classe_label(c.classe):<11} {kind:<11} {valor:>10}"
+    if c.padrinho:
+        line += f"   (ref. padrinho: {c.padrinho})"
+    return line
+
+
+def cmd_charges(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        mensalidade = finance.parse_brl(args.mensalidade)
+        if args.all:
+            charges = finance.all_charges(conn, mensalidade, args.since)
+            print(f"Cobranças do histórico: {len(charges)}")
+            for c in charges:
+                print(f"  {c.ref}" + _charge_line(c)[1:])
+            print(f"  total: {finance.fmt_brl(sum(c.amount_cents for c in charges))}")
+            return 0
+        date_iso = args.date or finance.latest_session_date(conn)
+        if date_iso is None:
+            print("erro: nenhuma partida registrada", file=sys.stderr)
+            return 2
+        if not conn.execute("SELECT 1 FROM session WHERE date = ?", (date_iso,)).fetchone():
+            print(f"erro: não há partida em {date_iso}", file=sys.stderr)
+            return 2
+        month = args.month or date_iso[:7]
+        diarias = finance.charges_for_session(conn, date_iso)
+        mensalidades = finance.charges_for_month(conn, month, mensalidade)
+    except finance.FinanceError as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+
+    print(f"Diárias da partida {date_iso}: {len(diarias)}")
+    for c in diarias:
+        print(_charge_line(c))
+    print(f"Mensalidades de {month}: {len(mensalidades)}")
+    for c in mensalidades:
+        print(_charge_line(c))
+    total = sum(c.amount_cents for c in diarias + mensalidades)
+    print(f"total: {finance.fmt_brl(total)}")
+    return 0
+
+
+def cmd_pay(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        player = finance.find_player(conn, args.jogador)
+        cents = finance.parse_brl(args.valor)
+        paid_on = args.paid_on or date.today().isoformat()
+        pay = finance.record_payment(conn, player["id"], cents, paid_on, args.ref, args.note)
+        saldo = finance.balance_of(conn, player["id"]).saldo_cents
+    except finance.FinanceError as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    ref = f" ref. {pay.ref}" if pay.ref else ""
+    print(
+        f"pagamento #{pay.id}: {pay.player_name} {finance.fmt_brl(pay.amount_cents)} "
+        f"em {pay.paid_on}{ref}"
+    )
+    print(f"saldo de {pay.player_name}: {_saldo_label(saldo)}")
+    return 0
+
+
+def _saldo_label(saldo: int) -> str:
+    if saldo > 0:
+        return f"pendência de {finance.fmt_brl(saldo)}"
+    if saldo < 0:
+        return f"crédito de {finance.fmt_brl(-saldo)}"
+    return "quitado"
+
+
+def cmd_balance(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        mensalidade = finance.parse_brl(args.mensalidade)
+        if args.jogador:
+            player = finance.find_player(conn, args.jogador)
+            pid = player["id"]
+            charges = [
+                c for c in finance.all_charges(conn, mensalidade, args.since) if c.player_id == pid
+            ]
+            pays = finance.payments(conn, pid)
+            bal = finance.balance_of(conn, pid, mensalidade, args.since)
+        else:
+            rows = finance.balances(conn, mensalidade, not args.all, args.since)
+    except finance.FinanceError as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+
+    if args.jogador:
+        print(f"{bal.player_name} ({finance.classe_label(bal.classe)})")
+        print(f"Cobranças: {len(charges)}")
+        for c in charges:
+            print(f"  {c.ref}" + _charge_line(c)[1:])
+        print(f"Pagamentos: {len(pays)}")
+        for p in pays:
+            extra = " ".join(x for x in (f"ref. {p.ref}" if p.ref else "", p.note) if x)
+            print(f"  {p.paid_on} {finance.fmt_brl(p.amount_cents):>10}   {extra}".rstrip())
+        print(
+            f"cobrado {finance.fmt_brl(bal.charged_cents)} · pago {finance.fmt_brl(bal.paid_cents)}"
+            f" · {_saldo_label(bal.saldo_cents)}"
+        )
+        return 0
+
+    title = "Saldo por jogador" if args.all else "Pendências"
+    print(f"{title}: {len(rows)}")
+    for b in rows:
+        print(
+            f"  {b.player_name:<30} {finance.classe_label(b.classe):<11} "
+            f"cobrado {finance.fmt_brl(b.charged_cents):>10}  "
+            f"pago {finance.fmt_brl(b.paid_cents):>10}  {_saldo_label(b.saldo_cents)}"
+        )
+    pend = sum(b.saldo_cents for b in rows if b.saldo_cents > 0)
+    print(f"total pendente: {finance.fmt_brl(pend)}")
+    return 0
+
+
 COMMANDS = {
     "init-db": cmd_init_db,
     "import-legacy": cmd_import_legacy,
@@ -230,6 +407,9 @@ COMMANDS = {
     "verify-backup": cmd_verify_backup,
     "propose": cmd_propose,
     "confirm": cmd_confirm,
+    "charges": cmd_charges,
+    "pay": cmd_pay,
+    "balance": cmd_balance,
 }
 
 
