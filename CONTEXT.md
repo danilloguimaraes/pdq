@@ -22,11 +22,13 @@ _Evitar_: "jogo", "rodada" no código.
 Pessoa cadastrada. `name` é preservado literalmente como na planilha;
 `legacy_id` é `AAMM` da primeira partida; `padrinho` é quem o apresentou.
 
-**Convidado** (`player.classe = C`):
-Jogador novo em avaliação. Após a quarta presença (status `X` ou `J`), entra na
-fila de decisão. A decisão pode promovê-lo a frequente (`F`) ou mensalista
-(`M`), ou registrar recusa, permanecendo convidado ou saindo sem apagar seu
-histórico.
+**Convidado** (`player.classe = C`, ou `-`/vazio herdado da planilha):
+Quem joga esporadicamente, em geral trazido por um padrinho. Jogadores criados
+pela confirmação nascem com classe `C` e, após a quarta presença (status `X` ou
+`J`), entram na fila de decisão: podem ser promovidos a frequente (`F`) ou
+mensalista (`M`), ou receber recusa, permanecendo convidados ou saindo (`-`)
+sem apagar o histórico. Convidado paga diária quando joga; a diária é dele, não
+do padrinho (ADR 0001). O padrinho aparece na cobrança apenas como referência.
 
 **Presença** (`attendance`, status `X`):
 O jogador estava na lista (goleiros ou linha) e foi.
@@ -93,7 +95,53 @@ _Evitar_: "editar no SQL", "ajuste manual".
 
 **Migração aditiva**:
 Evolução do schema que preserva dados e o comportamento do export legado,
-versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E5).
+versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4 + E5,
+desenvolvidas em paralelo; a guarda de migração verifica `payment` e
+`player.guest_status`).
+
+**Classe** (`player.classe`):
+Como o jogador se relaciona com o Pdq, herdada da coluna CLASSE da planilha:
+`M` mensalista, `F` frequente, `C` convidado; `-` ou vazio é convidado legado
+(ou quem saiu após recusa). É o estado atual, não versionado: a cobrança deriva
+sempre da classe de hoje.
+
+**Mensalista** (classe `M`):
+Paga **mensalidade** por mês com partida, jogue ou não. Nunca paga diária.
+
+**Frequente** (classe `F`):
+Jogador habitual sem mensalidade. Paga **diária** quando joga (X ou J).
+
+**Diária** (`Charge` com `kind="diaria"`):
+R$ 15 devidos por partida por frequente ou convidado presente (X ou J). Furo
+(`F`) não gera diária. Referência (`ref`): a data da partida.
+
+**Mensalidade** (`Charge` com `kind="mensalidade"`):
+Valor fixo por mês (padrão R$ 60, ajustável com `--mensalidade`) devido por
+mensalista em todo mês com partida, a partir do mês do seu primeiro registro
+(X/F/J). Referência (`ref`): `AAAA-MM`.
+
+**Cobrança** (`Charge`):
+Diária ou mensalidade devida por um jogador. Não é gravada: é derivada de
+presença + classe a cada consulta (`finance.all_charges`), então corrigir uma
+presença corrige a cobrança.
+_Evitar_: "débito", "fatura".
+
+**Pagamento** (`payment`):
+Valor efetivamente recebido de um jogador, em centavos, com data (`paid_on`) e
+referência opcional (`ref`: partida ou mês). É a única informação financeira
+gravada. Registrado por `pdq pay`.
+
+**Saldo** (`Balance`):
+Cobrado − pago por jogador. Positivo é **pendência**, negativo é **crédito**,
+zero é quitado. Sempre em nome do próprio jogador (o padrinho não herda saldo).
+
+**Pendência**:
+Saldo positivo: o que o jogador ainda deve. `pdq balance` lista só quem tem
+pendência; `--all` inclui quitados e créditos.
+
+**Início da contabilidade** (`--since AAAA-MM`):
+Mês a partir do qual as cobranças são consideradas; o que vem antes é
+histórico de presença sem efeito financeiro.
 
 ## Módulos
 
@@ -107,4 +155,11 @@ versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E5).
 | `pdq.postgame` | proposta, JSON, validação e confirmação |
 | `pdq.guest_lifecycle` | fila e decisão transacional de convidados |
 | `pdq.correction` | correção de partida confirmada (vínculo, status, seção, data, local, exclusão) |
-| `pdq.__main__` | CLI (`propose`, `confirm`, `relink`, `set-status`, `delete-session`, ...) |
+| `pdq.finance` | cobranças derivadas (diária, mensalidade), pagamentos e saldo |
+| `pdq.__main__` | CLI (`propose`, `confirm`, `relink`, `set-status`, `charges`, `pay`, `balance`, ...) |
+
+## Decisões
+
+| ADR | Decisão |
+|-----|---------|
+| [0001](docs/adr/0001-diaria-do-convidado.md) | A diária do convidado recai sobre o convidado; padrinho é referência |
