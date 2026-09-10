@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from pdq import __version__, backup, db, exporter, importer, postgame, validate
+from pdq import __version__, backup, correction, db, exporter, importer, postgame, validate
 
 LEGACY_CSV_DEFAULT = "legacy/Pdq - Frequencia - Historico.csv"
 
@@ -81,6 +81,67 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--dry-run", action="store_true", help="só valida e mostra o resumo; não grava nada"
     )
+    _add_db_arg(p)
+
+    # --- correção de partida (E2) -------------------------------------------
+    p = sub.add_parser("show-session", help="mostra uma partida gravada e suas presenças")
+    p.add_argument("date", help="data da partida AAAA-MM-DD")
+    _add_db_arg(p)
+
+    p = sub.add_parser(
+        "relink",
+        help="troca o jogador vinculado a uma presença",
+        description=(
+            "Move a presença de JOGADOR_ERRADO para JOGADOR_CERTO na partida, preservando "
+            "status, seção e observação. Jogadores podem ser id, nome exato ou alias. "
+            "Com --alias, a grafia da lista passa a apontar para o jogador certo."
+        ),
+    )
+    p.add_argument("date", help="data da partida AAAA-MM-DD")
+    p.add_argument("old", metavar="JOGADOR_ERRADO")
+    p.add_argument("new", metavar="JOGADOR_CERTO")
+    p.add_argument("--alias", help="grafia usada na lista, para aprender o vínculo correto")
+    _add_db_arg(p)
+
+    p = sub.add_parser(
+        "set-status",
+        help="alterna presença (X), furo (F), jogou (J) ou não jogou (-)",
+        description=(
+            "Corrige o status do jogador na partida. '-' significa que estava na lista "
+            "(em geral nas reservas) mas não jogou; a linha e sua seção são preservadas."
+        ),
+    )
+    p.add_argument("date", help="data da partida AAAA-MM-DD")
+    p.add_argument("player", metavar="JOGADOR", help="id, nome exato ou alias")
+    p.add_argument("status", choices=db.STATUSES)
+    _add_db_arg(p)
+
+    p = sub.add_parser("set-section", help="corrige a seção da lista (goleiros/linha/reservas)")
+    p.add_argument("date", help="data da partida AAAA-MM-DD")
+    p.add_argument("player", metavar="JOGADOR", help="id, nome exato ou alias")
+    p.add_argument("section", choices=db.SECTIONS)
+    _add_db_arg(p)
+
+    p = sub.add_parser("set-date", help="move a partida para outra data (renumera a ordem)")
+    p.add_argument("date", help="data atual AAAA-MM-DD")
+    p.add_argument("new_date", metavar="NOVA_DATA", help="nova data AAAA-MM-DD")
+    _add_db_arg(p)
+
+    p = sub.add_parser("set-venue", help="corrige o local da partida")
+    p.add_argument("date", help="data da partida AAAA-MM-DD")
+    p.add_argument("venue", metavar="LOCAL")
+    _add_db_arg(p)
+
+    p = sub.add_parser(
+        "delete-session",
+        help="exclui a partida e suas presenças (exige --yes)",
+        description=(
+            "Remove a sessão, suas presenças e match_meta; jogadores e aliases ficam. "
+            "Sem --yes apenas mostra o que seria excluído."
+        ),
+    )
+    p.add_argument("date", help="data da partida AAAA-MM-DD")
+    p.add_argument("--yes", action="store_true", help="confirma a exclusão")
     _add_db_arg(p)
     return parser
 
@@ -220,6 +281,87 @@ def cmd_confirm(args) -> int:
     return 0
 
 
+def _correct(args, fn):
+    """Executa uma correção com tratamento uniforme de erro e conexão."""
+    conn = db.connect(args.db)
+    try:
+        return fn(conn)
+    except correction.CorrectionError as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+
+
+def cmd_show_session(args) -> int:
+    def run(conn):
+        print(correction.render_session(correction.show_session(conn, args.date)))
+        return 0
+
+    return _correct(args, run)
+
+
+def cmd_relink(args) -> int:
+    def run(conn):
+        res = correction.relink(conn, args.date, args.old, args.new, alias=args.alias)
+        print(f"partida {res.date}: {res.old_player} -> {res.new_player}")
+        if res.learned_alias:
+            print(f"  alias aprendido: {res.learned_alias}")
+        return 0
+
+    return _correct(args, run)
+
+
+def cmd_set_status(args) -> int:
+    def run(conn):
+        res = correction.set_status(conn, args.date, args.player, args.status)
+        print(f"partida {res.date}: {res.player} {res.old_status} -> {res.new_status}")
+        return 0
+
+    return _correct(args, run)
+
+
+def cmd_set_section(args) -> int:
+    def run(conn):
+        res = correction.set_section(conn, args.date, args.player, args.section)
+        print(f"partida {res.date}: {res.player} {res.old_section or '?'} -> {res.new_section}")
+        return 0
+
+    return _correct(args, run)
+
+
+def cmd_set_date(args) -> int:
+    def run(conn):
+        res = correction.set_date(conn, args.date, args.new_date)
+        print(f"partida {res.old_date} movida para {res.new_date} (sessões renumeradas)")
+        return 0
+
+    return _correct(args, run)
+
+
+def cmd_set_venue(args) -> int:
+    def run(conn):
+        res = correction.set_venue(conn, args.date, args.venue)
+        print(f"partida {res.new_date}: local {res.old_venue!r} -> {res.new_venue!r}")
+        return 0
+
+    return _correct(args, run)
+
+
+def cmd_delete_session(args) -> int:
+    def run(conn):
+        view = correction.show_session(conn, args.date)
+        if not args.yes:
+            print(correction.render_session(view))
+            print("nada excluído: repita com --yes para confirmar", file=sys.stderr)
+            return 1
+        res = correction.delete_session(conn, args.date, confirm=True)
+        print(f"partida {res.date} excluída ({res.attendance} presenças removidas)")
+        return 0
+
+    return _correct(args, run)
+
+
 COMMANDS = {
     "init-db": cmd_init_db,
     "import-legacy": cmd_import_legacy,
@@ -230,6 +372,13 @@ COMMANDS = {
     "verify-backup": cmd_verify_backup,
     "propose": cmd_propose,
     "confirm": cmd_confirm,
+    "show-session": cmd_show_session,
+    "relink": cmd_relink,
+    "set-status": cmd_set_status,
+    "set-section": cmd_set_section,
+    "set-date": cmd_set_date,
+    "set-venue": cmd_set_venue,
+    "delete-session": cmd_delete_session,
 }
 
 

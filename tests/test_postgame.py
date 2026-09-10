@@ -203,6 +203,18 @@ def test_confirm_writes_session_attendance_meta_and_aliases(conn):
     assert att["DANTAS"] == ("J", "") and att["ANDRE TOME"] == ("J", "")
     assert att["AMELIO"] == ("X", "só o primeiro tempo")
     assert att["GUILHERME GK"] == ("X", "chega 20h30")
+    # a seção da lista é persistida (E2)
+    sections = {
+        r["name"]: r["section"]
+        for r in conn.execute(
+            "SELECT p.name, a.section FROM attendance a JOIN player p ON p.id=a.player_id "
+            "WHERE a.session_id = ?",
+            (res.session_id,),
+        )
+    }
+    assert sections["GUILHERME GK"] == "goleiros"
+    assert sections["AMELIO"] == "linha"
+    assert sections["DANTAS"] == "reservas"
     # a partida anterior permanece intacta
     assert conn.execute("SELECT status FROM attendance WHERE session_id = 1").fetchone()[0] == "X"
 

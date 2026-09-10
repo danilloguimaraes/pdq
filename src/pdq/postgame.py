@@ -301,8 +301,9 @@ def confirm(conn: sqlite3.Connection, proposal: Proposal) -> ConfirmResult:
                         (e.padrinho, pid),
                     )
             conn.execute(
-                "INSERT INTO attendance (player_id, session_id, status, note) VALUES (?, ?, ?, ?)",
-                (pid, session_id, e.status, e.observacao),
+                "INSERT INTO attendance (player_id, session_id, status, note, section) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (pid, session_id, e.status, e.observacao, e.section),
             )
             rows += 1
             if _worth_learning(conn, e.raw_name, pid) and aliases.learn(conn, e.raw_name, pid):
