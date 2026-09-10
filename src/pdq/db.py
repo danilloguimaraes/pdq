@@ -14,6 +14,8 @@ Versões do schema (PRAGMA user_version):
      player.guest_status e guest_decision_date). Aditiva e idempotente; a
      guarda de migração verifica as duas épicas, pois foram desenvolvidas em
      paralelo sob o mesmo número.
+- 5: higiene E6 (player.canonical_id) registra mesclas lógicas sem alterar
+     presenças históricas.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ SECTION_FIELD = "linha"
 SECTION_RESERVES = "reservas"
 SECTIONS = (SECTION_GOALKEEPERS, SECTION_FIELD, SECTION_RESERVES)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 CLASS_GUEST = "C"
 CLASS_FREQUENT = "F"
@@ -65,7 +67,8 @@ CREATE TABLE IF NOT EXISTS player (
     padrinho TEXT    NOT NULL DEFAULT '',  -- quem apresentou o jogador ao grupo
     guest_status TEXT NOT NULL DEFAULT '' CHECK (guest_status IN
         ('', 'pending', 'promoted', 'declined_stays', 'declined_leaves')),
-    guest_decision_date TEXT NOT NULL DEFAULT ''
+    guest_decision_date TEXT NOT NULL DEFAULT '',
+    canonical_id INTEGER REFERENCES player(id) CHECK (canonical_id IS NULL OR canonical_id <> id)
 );
 
 CREATE TABLE IF NOT EXISTS session (
@@ -155,6 +158,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         and "section" in _columns(conn, "attendance")
         and _table_sql(conn, "payment")
         and {"guest_status", "guest_decision_date"} <= _columns(conn, "player")
+        and "canonical_id" in _columns(conn, "player")
     ):
         return
 
@@ -195,6 +199,9 @@ def migrate(conn: sqlite3.Connection) -> None:
         )
     if "guest_decision_date" not in _columns(conn, "player"):
         conn.execute("ALTER TABLE player ADD COLUMN guest_decision_date TEXT NOT NULL DEFAULT ''")
+
+    if "canonical_id" not in _columns(conn, "player"):
+        conn.execute("ALTER TABLE player ADD COLUMN canonical_id INTEGER REFERENCES player(id)")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 

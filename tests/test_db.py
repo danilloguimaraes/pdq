@@ -55,7 +55,7 @@ def test_schema_version_and_new_tables(tmp_path):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(attendance)")}
     assert {"note", "section"} <= cols
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
-    assert {"padrinho", "guest_status", "guest_decision_date"} <= cols
+    assert {"padrinho", "guest_status", "guest_decision_date", "canonical_id"} <= cols
     conn.close()
 
 
@@ -156,7 +156,7 @@ def test_migrates_v2_database_adding_section_and_payment(tmp_path):
     raw.close()
 
     conn = db.connect(path)
-    assert db.schema_version(conn) == db.SCHEMA_VERSION == 4
+    assert db.schema_version(conn) == db.SCHEMA_VERSION == 5
     assert {"guest_status", "guest_decision_date"} <= {
         r["name"] for r in conn.execute("PRAGMA table_info(player)")
     }
@@ -171,7 +171,7 @@ def test_migrates_v2_database_adding_section_and_payment(tmp_path):
     conn.close()
 
     conn = db.connect(path)  # reabrir é idempotente
-    assert db.schema_version(conn) == 4
+    assert db.schema_version(conn) == 5
     assert conn.execute("SELECT COUNT(*) FROM payment").fetchone()[0] == 1
     conn.close()
 
@@ -252,7 +252,7 @@ def test_migrates_v3_database_adding_payment(tmp_path):
     raw.close()
 
     conn = db.connect(path)
-    assert db.schema_version(conn) == 4
+    assert db.schema_version(conn) == 5
     row = conn.execute("SELECT status, note, section FROM attendance").fetchone()
     assert tuple(row) == ("J", "obs", "reservas")
     conn.execute(
@@ -262,7 +262,7 @@ def test_migrates_v3_database_adding_payment(tmp_path):
     conn.close()
 
     conn = db.connect(path)  # reabrir é idempotente
-    assert db.schema_version(conn) == 4
+    assert db.schema_version(conn) == 5
     assert conn.execute("SELECT COUNT(*) FROM payment").fetchone()[0] == 1
     conn.close()
 
@@ -290,9 +290,9 @@ def test_completes_v4_database_created_by_a_single_epic(tmp_path, missing):
     raw.close()
 
     conn = db.connect(path)
-    assert db.schema_version(conn) == 4
+    assert db.schema_version(conn) == 5
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
-    assert {"guest_status", "guest_decision_date"} <= cols
+    assert {"guest_status", "guest_decision_date", "canonical_id"} <= cols
     conn.execute(
         "INSERT INTO payment (player_id, amount_cents, paid_on) VALUES (1, 1500, '2025-01-03')"
     )

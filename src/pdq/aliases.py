@@ -80,7 +80,10 @@ class Resolver:
     @classmethod
     def from_db(cls, conn: sqlite3.Connection, **kw) -> Resolver:
         players = {
-            r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM player ORDER BY pos")
+            r["id"]: r["name"]
+            for r in conn.execute(
+                "SELECT id, name FROM player WHERE canonical_id IS NULL ORDER BY pos"
+            )
         }
         aliases = {
             r["alias"]: r["player_id"]
