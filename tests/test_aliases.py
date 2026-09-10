@@ -117,3 +117,14 @@ def test_from_db_and_learn(tmp_path):
     assert Resolver.from_db(conn).exact("Zé Vitor") == 2
     assert aliases.aliases_of(conn, 1) == []
     conn.close()
+
+
+def test_from_db_ignores_merged_players(tmp_path):
+    conn = db.connect(tmp_path / "pdq.db")
+    conn.execute("INSERT INTO player (pos, name) VALUES (1, 'Carlos Silva'), (2, 'C. Silva')")
+    conn.execute("UPDATE player SET canonical_id = 1 WHERE id = 2")
+    conn.commit()
+    resolver = Resolver.from_db(conn)
+    assert resolver.exact("C. Silva") is None
+    assert [suggestion.player_id for suggestion in resolver.suggest("C. Silva")] == [1]
+    conn.close()

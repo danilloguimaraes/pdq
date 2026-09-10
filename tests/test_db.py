@@ -305,7 +305,7 @@ def test_completes_v4_database_created_by_a_single_epic(tmp_path, missing):
     conn = db.connect(path)
     assert db.schema_version(conn) == 5
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
-    assert {"guest_status", "guest_decision_date", "padrinho_id"} <= cols
+    assert {"guest_status", "guest_decision_date", "padrinho_id", "canonical_player_id"} <= cols
     conn.execute(
         "INSERT INTO payment (player_id, amount_cents, paid_on) VALUES (1, 1500, '2025-01-03')"
     )
