@@ -248,6 +248,8 @@ def validate(conn: sqlite3.Connection, proposal: Proposal) -> None:
         elif e.action == ACTION_LINK:
             if e.player_id not in player_ids:
                 problems.append(f"{where}: player_id {e.player_id!r} não existe")
+            elif db.canonical_player_id(conn, e.player_id) != e.player_id:
+                problems.append(f"{where}: player_id {e.player_id!r} não é uma identidade canônica")
             elif e.player_id in used:
                 problems.append(f"{where}: jogador repetido ({used[e.player_id]!r})")
             else:

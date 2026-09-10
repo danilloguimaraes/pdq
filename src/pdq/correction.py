@@ -51,12 +51,12 @@ def find_session(conn: sqlite3.Connection, date_iso: str) -> sqlite3.Row:
 
 
 def find_player(conn: sqlite3.Connection, ref: int | str) -> sqlite3.Row:
-    """Jogador por id, nome exato ou alias aprendido. Ambiguidade é erro."""
+    """Jogador canônico por id, nome exato ou alias aprendido. Ambiguidade é erro."""
     if isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit()):
         row = conn.execute("SELECT id, name FROM player WHERE id = ?", (int(ref),)).fetchone()
         if row is None:
             raise CorrectionError(f"player_id {int(ref)} não existe")
-        return row
+        return _canonical_player(conn, row)
     text = str(ref).strip()
     if not text:
         raise CorrectionError("jogador vazio")
@@ -76,7 +76,14 @@ def find_player(conn: sqlite3.Connection, ref: int | str) -> sqlite3.Row:
     if len(rows) > 1:
         opts = ", ".join(f"{r['name']} [{r['id']}]" for r in rows)
         raise CorrectionError(f"jogador {text!r} ambíguo: {opts}")
-    return rows[0]
+    return _canonical_player(conn, rows[0])
+
+
+def _canonical_player(conn: sqlite3.Connection, player: sqlite3.Row) -> sqlite3.Row:
+    canonical_id = db.canonical_player_id(conn, player["id"])
+    if canonical_id is None:
+        raise CorrectionError(f"identidade de {player['name']!r} não pode ser resolvida")
+    return conn.execute("SELECT id, name FROM player WHERE id = ?", (canonical_id,)).fetchone()
 
 
 def _attendance(conn: sqlite3.Connection, session_id: int, player_id: int) -> sqlite3.Row:

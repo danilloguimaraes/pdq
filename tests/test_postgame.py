@@ -118,6 +118,21 @@ def test_proposal_uses_alias_table(conn):
     assert p.entries[0].action == ACTION_LINK and p.entries[0].player_id == 4
 
 
+def test_proposal_resolves_merged_name_and_alias_without_suggesting_duplicate(conn):
+    conn.execute(
+        "INSERT INTO player (pos, classe, posicao, legacy_id, name, canonical_player_id) "
+        "VALUES (14, 'M', 'L', '2302', 'RODRIGO ANTIGO', 1)"
+    )
+    conn.execute("INSERT INTO player_alias VALUES ('rod antigo', 14)")
+    conn.commit()
+
+    for written in ("Rodrigo Antigo", "Rod Antigo"):
+        entry = postgame.build_proposal(conn, f"Pdq 05/09\n1. {written}", today=TODAY).entries[0]
+        assert (entry.action, entry.player_id, entry.player_name) == (ACTION_LINK, 1, "RODRIGO")
+    suggestions = aliases.Resolver.from_db(conn).suggest("Rodrigo Antigoo")
+    assert [(s.player_id, s.name) for s in suggestions] == [(1, "RODRIGO")]
+
+
 def test_proposal_date_rules(conn):
     assert postgame.build_proposal(conn, "1. Rodrigo", date_iso="2025-09-05").date == "2025-09-05"
     # data da lista tem prioridade menor que --date
@@ -261,6 +276,41 @@ def test_confirm_link_after_review_learns_alias(conn):
     # da próxima vez casa sozinho
     p2 = postgame.build_proposal(conn, "Pdq 12/09\n1. Gustavo", today=date(2025, 9, 13))
     assert p2.entries[0].action == ACTION_LINK and p2.entries[0].player_id == 4
+
+
+def test_confirm_uses_canonical_identity_and_preserves_legacy_duplicate(conn):
+    conn.execute(
+        "INSERT INTO player (pos, classe, posicao, legacy_id, name, canonical_player_id) "
+        "VALUES (14, 'M', 'L', '2302', 'RODRIGO ANTIGO', 1)"
+    )
+    conn.execute("INSERT INTO attendance (player_id, session_id, status) VALUES (14, 2, 'X')")
+    conn.commit()
+
+    proposal = postgame.build_proposal(conn, "Pdq 05/09\n1. Rodrigo Antigo", today=TODAY)
+    result = postgame.confirm(conn, proposal)
+    assert conn.execute(
+        "SELECT player_id FROM attendance WHERE session_id = ?", (result.session_id,)
+    ).fetchone()[0] == 1
+    alias = conn.execute(
+        "SELECT player_id FROM player_alias WHERE alias = 'rodrigo antigo'"
+    ).fetchone()
+    assert alias[0] == 1
+    rows = exporter.build_rows(conn)
+    body = {r[4]: r for r in rows[5:]}
+    session_column = rows[4].index("21/08/2025")
+    assert body["RODRIGO ANTIGO"][session_column] == "X"
+
+
+def test_confirm_refuses_link_to_merged_identity(conn):
+    conn.execute(
+        "INSERT INTO player (pos, classe, posicao, legacy_id, name, canonical_player_id) "
+        "VALUES (14, 'M', 'L', '2302', 'RODRIGO ANTIGO', 1)"
+    )
+    conn.commit()
+    proposal = postgame.build_proposal(conn, "Pdq 05/09\n1. Rodrigo", today=TODAY)
+    proposal.entries[0].player_id = 14
+    with pytest.raises(ProposalError, match="não é uma identidade canônica"):
+        postgame.confirm(conn, proposal)
 
 
 def test_confirm_sets_padrinho_of_existing_player_if_empty(conn):
