@@ -105,9 +105,9 @@ def test_merge_rejects_invalid_ids_and_alias_conflicts(db_path):
     proc = run("merge", "--db", str(db_path), "3", "4")
     assert proc.returncode == 0, proc.stderr
     assert "aliases aprendidos: gustavo oliveira" in proc.stdout
-    assert query(
-        db_path, "SELECT player_id FROM player_alias WHERE alias = 'gustavo bastos'"
-    ) == [(5,)]
+    assert query(db_path, "SELECT player_id FROM player_alias WHERE alias = 'gustavo bastos'") == [
+        (5,)
+    ]
 
 
 def test_relink_with_alias(db_path):

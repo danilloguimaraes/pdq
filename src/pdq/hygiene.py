@@ -81,9 +81,7 @@ def padrinho_report(
     players = conn.execute("SELECT id, name FROM player ORDER BY pos, id").fetchall()
     reviews: list[PadrinhoReview] = []
     for row in players:
-        if conn.execute(
-            "SELECT padrinho_id FROM player WHERE id = ?", (row["id"],)
-        ).fetchone()[0]:
+        if conn.execute("SELECT padrinho_id FROM player WHERE id = ?", (row["id"],)).fetchone()[0]:
             continue
         padrinho = extract_padrinho(row["name"])
         if padrinho is None:
@@ -93,9 +91,7 @@ def padrinho_report(
         for candidate in players:
             if candidate["id"] == row["id"]:
                 continue
-            score = SequenceMatcher(
-                None, needle, aliases.normalize(candidate["name"])
-            ).ratio()
+            score = SequenceMatcher(None, needle, aliases.normalize(candidate["name"])).ratio()
             if score >= cutoff:
                 candidates.append(
                     PadrinhoCandidate(candidate["id"], candidate["name"], round(score, 3))
@@ -199,6 +195,7 @@ def apply_padrinho_decisions(
             [(link.padrinho_id, link.player_id) for link in links],
         )
     return links
+
 
 @dataclass(frozen=True)
 class MergeEvidence:

@@ -25,12 +25,15 @@ python -m pdq --help
 | `pdq backup` | copia `data/` para `backups/<YYYYMMDD-HHMMSS>/` com `manifest.json` (SHA-256) |
 | `pdq restore [DIR]` | recria `data/` a partir de um backup (padrão: o mais recente), conferindo hashes |
 | `pdq verify-backup [DIR]` | confere a integridade de um backup |
+| `pdq hygiene-report [--threshold N]` | lista referências legadas de padrinho e candidatos para revisão, sem alterar o banco |
+| `pdq hygiene-apply DECISOES [--yes]` | mostra ou aplica decisões revisadas de vínculo de padrinho |
 | `pdq propose LISTA [-o ARQ] [--date] [--venue]` | lê a lista do WhatsApp e gera a proposta de presenças (JSON) |
 | `pdq confirm PROPOSTA [--dry-run]` | grava a partida a partir da proposta revisada |
 | `pdq guest-queue` | lista convidados com quatro presenças aguardando decisão |
 | `pdq promote-guest JOGADOR {F,M} DATA` | promove convidado pendente com a data da decisão |
 | `pdq decline-guest JOGADOR DATA {--keep-guest,--leaves}` | registra recusa mantendo o convidado ou sua saída |
 | `pdq show-session DATA` | mostra uma partida gravada e suas presenças |
+| `pdq merge ORIGEM CANONICO` | mescla uma linha legada em uma identidade canônica por IDs explícitos |
 | `pdq relink DATA ERRADO CERTO [--alias GRAFIA]` | troca o jogador vinculado a uma presença |
 | `pdq set-status DATA JOGADOR {X,F,J,-}` | alterna presença / furo / jogou / não jogou |
 | `pdq set-section DATA JOGADOR {goleiros,linha,reservas}` | corrige a seção da lista |
@@ -173,6 +176,48 @@ python -m pdq validate-legacy 'legacy/Pdq - Frequencia - Historico.csv'
 # diferenças (modo estrito): 0
 # bytes idênticos (modo estrito): sim
 ```
+
+## Auditoria de identidade
+
+A higiene de identidade é deliberadamente conservadora: o relatório apenas
+sugere candidatos a padrinho por similaridade e nunca grava um vínculo nem
+mescla jogadores automaticamente, mesmo quando os nomes parecem iguais. Revise
+o relatório, crie ou edite o JSON de decisões, confira a prévia e só então
+aplique explicitamente:
+
+```sh
+python -m pdq hygiene-report --threshold 0.8
+# editar decisoes.json
+python -m pdq hygiene-apply decisoes.json       # prévia; não grava e sai com 1
+python -m pdq hygiene-apply decisoes.json --yes # aplica todos os vínculos numa transação
+```
+
+O formato do arquivo é estrito e editável. Cada decisão aponta, por IDs, a linha
+legada que contém a anotação de padrinho e o jogador escolhido como padrinho:
+
+```json
+{
+  "decisions": [
+    {"player_id": 42, "padrinho_id": 7}
+  ]
+}
+```
+
+`hygiene-apply` valida todas as decisões antes de gravar. Uma referência
+inexistente, duplicada, autorreferente ou já vinculada cancela a operação inteira.
+
+Quando a auditoria confirmar que duas linhas representam a mesma pessoa, a
+mesclagem também é uma decisão explícita, sem inferência por nome:
+
+```sh
+python -m pdq merge 42 7
+```
+
+O primeiro ID é a linha legada de origem e o segundo é a identidade canônica. A
+mesclagem é transacional: preserva a linha e as presenças da origem para a
+exportação legada, redireciona aliases ao canônico e consolida aliases, consultas
+e financeiro na mesma pessoa. Ela não reescreve a matriz legada, portanto o
+round-trip de `validate-legacy` permanece byte a byte.
 
 ## Modelo de dados
 

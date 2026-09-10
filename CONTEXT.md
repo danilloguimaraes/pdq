@@ -34,6 +34,22 @@ mesclagem. A linha legada e seu histórico continuam preservados; aliases,
 sugestões e financeiro resolvem o jogador canônico. A resolução é segura e
 diagnostica cadeia, ciclo, autorreferência ou referência inválida.
 
+**Auditoria de identidade / higiene** (`hygiene-report`):
+Relatório somente de leitura de referências legadas de padrinho e candidatos por
+similaridade. Serve para revisão humana; candidatos e nomes parecidos nunca
+criam vínculos ou mesclagens automaticamente.
+
+**Decisão explícita** (`hygiene-apply`):
+Entrada JSON editável com `player_id` e `padrinho_id` escolhidos por revisão
+humana. Sem `--yes`, o comando apenas mostra a prévia; com `--yes`, valida todas
+as decisões e aplica o conjunto inteiro numa transação.
+
+**Mesclagem transacional** (`merge`):
+Decisão explícita por `player_id` de origem e da identidade canônica. Preserva a
+linha legada e as presenças da origem, redireciona seus aliases ao canônico e
+não altera o layout nem o histórico da exportação legada. Nunca é inferida por
+similaridade de nomes.
+
 **Convidado** (`player.classe = C`, ou `-`/vazio herdado da planilha):
 Quem joga esporadicamente, em geral trazido por um padrinho. Jogadores criados
 pela confirmação nascem com classe `C` e, após a quarta presença (status `X` ou
@@ -166,11 +182,12 @@ histórico de presença sem efeito financeiro.
 | `pdq.backup` | backup e restauração de `data/` |
 | `pdq.whatsapp` | parser puro da lista (sem banco) |
 | `pdq.aliases` | normalização, vínculo exato, sugestões, aprendizado |
+| `pdq.hygiene` | relatório sugestivo, decisões explícitas de padrinho e mesclagem transacional de identidades |
 | `pdq.postgame` | proposta, JSON, validação e confirmação |
 | `pdq.guest_lifecycle` | fila e decisão transacional de convidados |
 | `pdq.correction` | correção de partida confirmada (vínculo, status, seção, data, local, exclusão) |
 | `pdq.finance` | cobranças derivadas (diária, mensalidade), pagamentos e saldo |
-| `pdq.__main__` | CLI (`propose`, `confirm`, `relink`, `set-status`, `charges`, `pay`, `balance`, ...) |
+| `pdq.__main__` | CLI (`hygiene-report`, `hygiene-apply`, `merge`, `propose`, `confirm`, `relink`, `set-status`, `charges`, `pay`, `balance`, ...) |
 
 ## Decisões
 
