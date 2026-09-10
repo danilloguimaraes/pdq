@@ -48,3 +48,4 @@ def test_cli_validate_legacy(legacy_csv):
     )
     assert proc.returncode == 0, proc.stderr
     assert "diferenças (modo estrito): 0" in proc.stdout
+    assert "bytes idênticos (modo estrito): sim" in proc.stdout

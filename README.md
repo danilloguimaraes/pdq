@@ -86,7 +86,9 @@ A proposta atribui um status por linha e uma ação de vínculo:
 proposta com pendências ou com data já registrada e grava tudo numa única transação:
 sessão, `match_meta` (vagas vazias, texto original), presenças com observação,
 jogadores novos (`legacy_id` = AAMM da partida) e aliases aprendidos, que fazem a
-próxima lista casar sozinha.
+próxima lista casar sozinha. O vínculo é resolvido para a identidade canônica do
+jogador: a linha da planilha continua preservada, mas aliases e sugestões não
+voltam a oferecer duplicatas que já foram mescladas.
 
 ## Ciclo de vida do convidado
 
@@ -144,10 +146,12 @@ python -m pdq balance                              # quem ainda deve
 python -m pdq balance Rodrigo                      # cobranças e pagamentos dele
 ```
 
-`JOGADOR` aceita id, nome da planilha ou alias aprendido. Como a planilha legada
-traz anos de histórico, use `--since AAAA-MM` para começar a contabilidade num mês
-(cobranças anteriores são ignoradas). Saldo positivo é pendência, negativo é crédito.
-Como a cobrança é derivada, uma correção de partida (`set-status`, `relink`,
+`JOGADOR` aceita id, nome da planilha ou alias aprendido. A consulta resolve essa
+entrada para a identidade canônica, portanto cobranças, pagamentos e saldo de linhas
+legadas mescladas ficam na mesma pessoa. Como a planilha legada traz anos de
+histórico, use `--since AAAA-MM` para começar a contabilidade num mês (cobranças
+anteriores são ignoradas). Saldo positivo é pendência, negativo é crédito. Como a
+cobrança é derivada, uma correção de partida (`set-status`, `relink`,
 `delete-session`) ajusta o saldo automaticamente; os pagamentos ficam intactos.
 
 ## Exportação e a inconsistência da planilha
@@ -157,10 +161,27 @@ A planilha original tem a fórmula de Presenças por jogador desatualizada
 esse comportamento e gera bytes idênticos ao original; sem a flag, apenas as
 20 células afetadas mudam (+1 cada).
 
+O exportador lê sempre a linha legada de `player` (`pos`, `classe`, `posicao`,
+`legacy_id` e `name`) e suas presenças. A identidade canônica, aliases, padrinho,
+observações, seções, metadados e pagamentos não pertencem à matriz legada e nunca
+substituem esses campos na exportação. Assim, uma higiene de identidade não altera
+o layout nem os bytes da planilha: o round-trip abaixo deve continuar estritamente
+idêntico.
+
+```sh
+python -m pdq validate-legacy 'legacy/Pdq - Frequencia - Historico.csv'
+# diferenças (modo estrito): 0
+# bytes idênticos (modo estrito): sim
+```
+
 ## Modelo de dados
 
-- `player(pos, classe, posicao, legacy_id, name, guest_status, guest_decision_date)`: uma linha por jogador, `pos` é a
-  ordem na planilha. Textos preservados literalmente.
+- `player(pos, classe, posicao, legacy_id, name, padrinho, guest_status, guest_decision_date,
+  canonical_player_id)`: uma linha legada por jogador, `pos` é a ordem na planilha
+  e os cinco primeiros campos são preservados literalmente para exportação.
+  `canonical_player_id` é uma autorreferência opcional: aponta para a identidade
+  canônica da mesma pessoa depois de uma mesclagem, sem mover ou reescrever o
+  histórico da linha legada.
 - `session(ordem, date, venue)`: `ordem` 1 = sessão mais recente; `date` em ISO 8601.
 - `attendance(player_id, session_id, status, note, section)`: `status` em `X` (presente),
   `F` (furo), `J` (reserva que jogou; exportado como `X`), `-` (sem registro / listado que
@@ -168,15 +189,17 @@ esse comportamento e gera bytes idênticos ao original; sem a flag, apenas as
   a seção (`goleiros`, `linha`, `reservas`; vazia nas linhas importadas da planilha).
 - `player.padrinho`: quem apresentou o jogador (texto da lista).
 - `player_alias(alias, player_id)`: apelidos normalizados (sem acento/caixa/pontuação)
-  aprendidos nas confirmações.
+  aprendidos nas confirmações e resolvidos para o jogador canônico em sugestões e
+  consultas financeiras.
 - `match_meta(session_id, vagas_vazias, observacao, raw_list)`: dados da lista que não
   cabem na planilha.
 - `payment(player_id, amount_cents, paid_on, ref, note)`: pagamentos recebidos, em centavos;
   `ref` é a partida (`AAAA-MM-DD`) ou o mês (`AAAA-MM`) a que se refere.
 
 Faltas e Presenças (por jogador e por sessão) são derivados e recalculados na exportação.
-O schema é versionado por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4 + E5); bancos antigos
-são migrados automaticamente ao abrir, sem perda de dados. Consulte `CONTEXT.md` para o vocabulário.
+O schema é versionado por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4 + E5,
+5 = identidade canônica); bancos antigos são migrados automaticamente ao abrir, sem
+perda de dados. Consulte `CONTEXT.md` para o vocabulário.
 
 ## Desenvolvimento
 
