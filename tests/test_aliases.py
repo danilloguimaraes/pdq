@@ -119,10 +119,26 @@ def test_from_db_and_learn(tmp_path):
     conn.close()
 
 
+def test_resolver_hides_merged_player_and_resolves_its_alias(tmp_path):
+    conn = db.connect(tmp_path / "pdq.db")
+    conn.executemany(
+        "INSERT INTO player (id, pos, name) VALUES (?, ?, ?)",
+        [(1, 1, "Carlos Silva"), (2, 2, "C. Silva")],
+    )
+    conn.execute("UPDATE player SET canonical_player_id = 1 WHERE id = 2")
+    conn.execute("INSERT INTO player_alias VALUES ('c silva', 1)")
+    conn.commit()
+
+    resolver = Resolver.from_db(conn)
+    assert resolver.exact("C. Silva") == 1
+    assert [suggestion.player_id for suggestion in resolver.suggest("Silva")] == [1]
+    conn.close()
+
+
 def test_from_db_ignores_merged_players(tmp_path):
     conn = db.connect(tmp_path / "pdq.db")
     conn.execute("INSERT INTO player (pos, name) VALUES (1, 'Carlos Silva'), (2, 'C. Silva')")
-    conn.execute("UPDATE player SET canonical_id = 1 WHERE id = 2")
+    conn.execute("UPDATE player SET canonical_player_id = 1 WHERE id = 2")
     conn.commit()
     resolver = Resolver.from_db(conn)
     assert resolver.exact("C. Silva") is None

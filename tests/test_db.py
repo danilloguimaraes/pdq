@@ -316,7 +316,9 @@ def test_completes_v4_database_created_by_a_single_epic(tmp_path, missing):
     conn.close()
 
 
-V4_SCHEMA = V3_SCHEMA + """
+V4_SCHEMA = (
+    V3_SCHEMA
+    + """
 CREATE TABLE payment (
     id INTEGER PRIMARY KEY,
     player_id INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE,
@@ -331,6 +333,7 @@ INSERT INTO player_alias VALUES ('a', 1);
 INSERT INTO payment (player_id, amount_cents, paid_on) VALUES (1, 1500, '2025-01-03');
 PRAGMA user_version = 4;
 """
+)
 
 
 def test_migrates_v4_database_preserving_related_records(tmp_path):

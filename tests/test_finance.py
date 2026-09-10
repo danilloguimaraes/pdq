@@ -1,6 +1,6 @@
 import pytest
 
-from pdq import correction, db, finance
+from pdq import correction, db, finance, hygiene
 
 
 @pytest.fixture
@@ -197,3 +197,50 @@ def test_classe_helpers():
     assert finance.classe_label("M") == "mensalista"
     assert finance.classe_label("F") == "frequente"
     assert finance.classe_label("-") == finance.classe_label("") == "convidado"
+
+
+def test_merge_consolidates_aliases_charges_payments_and_balance(tmp_path):
+    conn = db.connect(tmp_path / "pdq.db")
+    conn.executemany(
+        "INSERT INTO player (id, pos, classe, name) VALUES (?, ?, ?, ?)",
+        [(1, 1, "F", "Carlos Silva"), (2, 2, "F", "C. Silva")],
+    )
+    conn.executemany(
+        "INSERT INTO session (id, ordem, date) VALUES (?, ?, ?)",
+        [(1, 2, "2025-09-01"), (2, 1, "2025-09-08")],
+    )
+    conn.executemany(
+        "INSERT INTO attendance (player_id, session_id, status) VALUES (?, ?, 'X')",
+        [(1, 1), (2, 2)],
+    )
+    finance.record_payment(conn, 2, 1500, "2025-09-09")
+
+    hygiene.merge(conn, 2, 1)
+
+    assert finance.find_player(conn, "C. Silva")["id"] == 1
+    assert [(charge.player_id, charge.ref) for charge in finance.all_charges(conn)] == [
+        (1, "2025-09-01"),
+        (1, "2025-09-08"),
+    ]
+    assert finance.balance_of(conn, 1).saldo_cents == 1500
+    assert finance.balance_of(conn, 2).saldo_cents == 0
+    assert [payment.player_id for payment in finance.payments(conn)] == [1]
+    conn.close()
+
+
+def test_merge_does_not_duplicate_diaria_when_both_legacy_lines_play(tmp_path):
+    conn = db.connect(tmp_path / "pdq.db")
+    conn.executemany(
+        "INSERT INTO player (id, pos, classe, name) VALUES (?, ?, 'F', ?)",
+        [(1, 1, "Carlos Silva"), (2, 2, "C. Silva")],
+    )
+    conn.execute("INSERT INTO session (id, ordem, date) VALUES (1, 1, '2025-09-01')")
+    conn.executemany(
+        "INSERT INTO attendance (player_id, session_id, status) VALUES (?, 1, 'X')", [(1,), (2,)]
+    )
+    hygiene.merge(conn, 2, 1)
+
+    assert [(charge.player_id, charge.amount_cents) for charge in finance.all_charges(conn)] == [
+        (1, 1500)
+    ]
+    conn.close()
