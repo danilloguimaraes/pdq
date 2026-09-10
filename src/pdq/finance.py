@@ -151,18 +151,30 @@ def charges_for_session(conn: sqlite3.Connection, session_date: str) -> list[Cha
         """,
         (session_date,),
     ).fetchall()
-    return [
-        Charge(
-            player_id=r["id"],
-            player_name=r["name"],
-            classe=r["classe"],
-            kind=KIND_DIARIA,
-            ref=session_date,
-            amount_cents=DIARIA_CENTAVOS,
-            padrinho=r["padrinho"] if is_convidado(r["classe"]) else "",
+    charges = []
+    charged_ids = set()
+    for row in rows:
+        canonical_id = db.canonical_player_id(conn, row["id"])
+        if canonical_id is None or canonical_id in charged_ids:
+            continue
+        player = conn.execute(
+            "SELECT id, name, classe, padrinho FROM player WHERE id = ?", (canonical_id,)
+        ).fetchone()
+        if player["classe"] == CLASSE_MENSALISTA:
+            continue
+        charged_ids.add(canonical_id)
+        charges.append(
+            Charge(
+                player["id"],
+                player["name"],
+                player["classe"],
+                KIND_DIARIA,
+                session_date,
+                DIARIA_CENTAVOS,
+                player["padrinho"] if is_convidado(player["classe"]) else "",
+            )
         )
-        for r in rows
-    ]
+    return charges
 
 
 def _months_with_sessions(conn: sqlite3.Connection) -> list[str]:
@@ -173,17 +185,26 @@ def _months_with_sessions(conn: sqlite3.Connection) -> list[str]:
 
 def _mensalistas_first_month(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Mensalistas com o mês (AAAA-MM) do primeiro registro X/F/J."""
-    return conn.execute(
+    first_months = {}
+    for row in conn.execute(
         """
-        SELECT p.id, p.name, p.classe, MIN(substr(s.date, 1, 7)) AS first_month
-          FROM player p
-          JOIN attendance a ON a.player_id = p.id AND a.status IN ('X', 'F', 'J')
-          JOIN session s ON s.id = a.session_id
-         WHERE p.classe = 'M'
-         GROUP BY p.id
-         ORDER BY p.pos
+        SELECT a.player_id, MIN(substr(s.date, 1, 7)) AS first_month
+          FROM attendance a JOIN session s ON s.id = a.session_id
+         WHERE a.status IN ('X', 'F', 'J') GROUP BY a.player_id
         """
-    ).fetchall()
+    ):
+        canonical_id = db.canonical_player_id(conn, row["player_id"])
+        if canonical_id is not None:
+            first_months[canonical_id] = min(
+                first_months.get(canonical_id, row["first_month"]), row["first_month"]
+            )
+    return [
+        (player, first_months[player["id"]])
+        for player in conn.execute(
+            "SELECT id, name, classe FROM player WHERE classe = 'M' ORDER BY pos"
+        )
+        if player["id"] in first_months
+    ]
 
 
 def charges_for_month(
@@ -194,9 +215,16 @@ def charges_for_month(
     if month not in _months_with_sessions(conn):
         return []
     return [
-        Charge(r["id"], r["name"], r["classe"], KIND_MENSALIDADE, month, mensalidade_cents)
-        for r in _mensalistas_first_month(conn)
-        if r["first_month"] <= month
+        Charge(
+            player["id"],
+            player["name"],
+            player["classe"],
+            KIND_MENSALIDADE,
+            month,
+            mensalidade_cents,
+        )
+        for player, first_month in _mensalistas_first_month(conn)
+        if first_month <= month
     ]
 
 
@@ -218,9 +246,16 @@ def all_charges(
         if month < since:
             continue
         charges.extend(
-            Charge(r["id"], r["name"], r["classe"], KIND_MENSALIDADE, month, mensalidade_cents)
-            for r in mensalistas
-            if r["first_month"] <= month
+            Charge(
+                player["id"],
+                player["name"],
+                player["classe"],
+                KIND_MENSALIDADE,
+                month,
+                mensalidade_cents,
+            )
+            for player, first_month in mensalistas
+            if first_month <= month
         )
     return charges
 
@@ -239,19 +274,22 @@ def find_player(conn: sqlite3.Connection, key: str) -> sqlite3.Row:
         row = conn.execute("SELECT * FROM player WHERE id = ?", (int(key),)).fetchone()
         if row is None:
             raise FinanceError(f"jogador id {key} não existe")
-        return row
+        canonical_id = db.canonical_player_id(conn, row["id"])
+        return conn.execute("SELECT * FROM player WHERE id = ?", (canonical_id,)).fetchone()
     norm = aliases.normalize(key)
     row = conn.execute(
         "SELECT p.* FROM player_alias a JOIN player p ON p.id = a.player_id WHERE a.alias = ?",
         (norm,),
     ).fetchone()
     if row is not None:
-        return row
+        canonical_id = db.canonical_player_id(conn, row["id"])
+        return conn.execute("SELECT * FROM player WHERE id = ?", (canonical_id,)).fetchone()
     matches = [
         p for p in conn.execute("SELECT * FROM player") if aliases.normalize(p["name"]) == norm
     ]
     if len(matches) == 1:
-        return matches[0]
+        canonical_id = db.canonical_player_id(conn, matches[0]["id"])
+        return conn.execute("SELECT * FROM player WHERE id = ?", (canonical_id,)).fetchone()
     if not matches:
         raise FinanceError(f"jogador não encontrado: {key!r} (use o id ou o nome da planilha)")
     ids = ", ".join(str(p["id"]) for p in matches)
