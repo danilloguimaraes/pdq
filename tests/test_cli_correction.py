@@ -50,6 +50,7 @@ def query(db_path, sql):
 def test_help_lists_correction_commands():
     for cmd in (
         "show-session",
+        "merge",
         "relink",
         "set-status",
         "set-section",
@@ -68,6 +69,45 @@ def test_show_session(db_path):
     assert "F lin DANILLO" in proc.stdout and "J res SAULO" in proc.stdout
     proc = run("show-session", "--db", str(db_path), "2025-01-01")
     assert proc.returncode == 2 and "não existe sessão" in proc.stderr
+
+
+def test_merge_consolidates_aliases_and_preserves_legacy_attendance(db_path):
+    conn = db.connect(db_path)
+    conn.execute("INSERT INTO player_alias (alias, player_id) VALUES ('guga', 3)")
+    conn.commit()
+    conn.close()
+
+    proc = run("merge", "--db", str(db_path), "3", "4")
+
+    assert proc.returncode == 0, proc.stderr
+    assert "GUSTAVO BASTOS [3] -> GUSTAVO OLIVEIRA [4]" in proc.stdout
+    assert "presenças legadas preservadas: 1" in proc.stdout
+    assert "aliases redirecionados: guga" in proc.stdout
+    assert "aliases aprendidos: gustavo bastos, gustavo oliveira" in proc.stdout
+    assert query(db_path, "SELECT canonical_player_id FROM player WHERE id = 3") == [(4,)]
+    assert query(db_path, "SELECT player_id FROM player_alias WHERE alias = 'guga'") == [(4,)]
+    assert query(
+        db_path, "SELECT player_id FROM attendance WHERE session_id = 1 AND player_id = 3"
+    ) == [(3,)]
+
+
+def test_merge_rejects_invalid_ids_and_alias_conflicts(db_path):
+    proc = run("merge", "--db", str(db_path), "3", "3")
+    assert proc.returncode == 2 and "jogadores diferentes" in proc.stderr
+
+    proc = run("merge", "--db", str(db_path), "invalido", "4")
+    assert proc.returncode == 2 and "invalid int value" in proc.stderr
+
+    conn = db.connect(db_path)
+    conn.execute("INSERT INTO player_alias (alias, player_id) VALUES ('gustavo bastos', 5)")
+    conn.commit()
+    conn.close()
+    proc = run("merge", "--db", str(db_path), "3", "4")
+    assert proc.returncode == 0, proc.stderr
+    assert "aliases aprendidos: gustavo oliveira" in proc.stdout
+    assert query(
+        db_path, "SELECT player_id FROM player_alias WHERE alias = 'gustavo bastos'"
+    ) == [(5,)]
 
 
 def test_relink_with_alias(db_path):
