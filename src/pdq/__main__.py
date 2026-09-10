@@ -6,7 +6,17 @@ import argparse
 import sys
 from pathlib import Path
 
-from pdq import __version__, backup, correction, db, exporter, importer, postgame, validate
+from pdq import (
+    __version__,
+    backup,
+    correction,
+    db,
+    exporter,
+    guest_lifecycle,
+    importer,
+    postgame,
+    validate,
+)
 
 LEGACY_CSV_DEFAULT = "legacy/Pdq - Frequencia - Historico.csv"
 
@@ -67,6 +77,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--date", help="data da partida AAAA-MM-DD (padrão: extraída da lista)")
     p.add_argument("--venue", help="local (padrão: detectado no título ou o da última sessão)")
     p.add_argument("-q", "--quiet", action="store_true", help="não imprime o resumo")
+    _add_db_arg(p)
+
+    p = sub.add_parser("guest-queue", help="lista convidados com 4 presenças aguardando decisão")
+    _add_db_arg(p)
+
+    p = sub.add_parser("promote-guest", help="promove convidado pendente a frequente ou mensalista")
+    p.add_argument("player", metavar="JOGADOR", help="id, nome exato ou alias")
+    p.add_argument("classe", choices=(db.CLASS_FREQUENT, db.CLASS_MONTHLY))
+    p.add_argument("date", metavar="DATA", help="data da decisão AAAA-MM-DD")
+    _add_db_arg(p)
+
+    p = sub.add_parser("decline-guest", help="registra a recusa de um convidado pendente")
+    p.add_argument("player", metavar="JOGADOR", help="id, nome exato ou alias")
+    p.add_argument("date", metavar="DATA", help="data da decisão AAAA-MM-DD")
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--keep-guest", action="store_true", help="permanece como convidado")
+    group.add_argument("--leaves", action="store_true", help="registra que saiu do grupo")
     _add_db_arg(p)
 
     p = sub.add_parser(
@@ -281,6 +308,49 @@ def cmd_confirm(args) -> int:
     return 0
 
 
+def _guest_lifecycle(args, fn):
+    conn = db.connect(args.db)
+    try:
+        return fn(conn)
+    except guest_lifecycle.GuestLifecycleError as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+
+
+def cmd_guest_queue(args) -> int:
+    return _guest_lifecycle(
+        args,
+        lambda conn: (
+            print(guest_lifecycle.render_pending(guest_lifecycle.pending_guests(conn))),
+            0,
+        )[1],
+    )
+
+
+def cmd_promote_guest(args) -> int:
+    def run(conn):
+        result = guest_lifecycle.promote(conn, args.player, args.classe, args.date)
+        print(
+            f"{result.name} [{result.player_id}] promovido a {result.classe} "
+            f"em {result.decision_date}"
+        )
+        return 0
+
+    return _guest_lifecycle(args, run)
+
+
+def cmd_decline_guest(args) -> int:
+    def run(conn):
+        result = guest_lifecycle.decline(conn, args.player, args.keep_guest, args.date)
+        decision = "permanece convidado" if args.keep_guest else "saiu do grupo"
+        print(f"recusa de {result.name} [{result.player_id}] em {result.decision_date}: {decision}")
+        return 0
+
+    return _guest_lifecycle(args, run)
+
+
 def _correct(args, fn):
     """Executa uma correção com tratamento uniforme de erro e conexão."""
     conn = db.connect(args.db)
@@ -372,6 +442,9 @@ COMMANDS = {
     "verify-backup": cmd_verify_backup,
     "propose": cmd_propose,
     "confirm": cmd_confirm,
+    "guest-queue": cmd_guest_queue,
+    "promote-guest": cmd_promote_guest,
+    "decline-guest": cmd_decline_guest,
     "show-session": cmd_show_session,
     "relink": cmd_relink,
     "set-status": cmd_set_status,

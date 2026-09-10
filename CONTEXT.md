@@ -22,6 +22,12 @@ _Evitar_: "jogo", "rodada" no código.
 Pessoa cadastrada. `name` é preservado literalmente como na planilha;
 `legacy_id` é `AAMM` da primeira partida; `padrinho` é quem o apresentou.
 
+**Convidado** (`player.classe = C`):
+Jogador novo em avaliação. Após a quarta presença (status `X` ou `J`), entra na
+fila de decisão. A decisão pode promovê-lo a frequente (`F`) ou mensalista
+(`M`), ou registrar recusa, permanecendo convidado ou saindo sem apagar seu
+histórico.
+
 **Presença** (`attendance`, status `X`):
 O jogador estava na lista (goleiros ou linha) e foi.
 
@@ -87,7 +93,7 @@ _Evitar_: "editar no SQL", "ajuste manual".
 
 **Migração aditiva**:
 Evolução do schema que preserva dados e o comportamento do export legado,
-versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2).
+versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E5).
 
 ## Módulos
 
@@ -99,5 +105,6 @@ versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2).
 | `pdq.whatsapp` | parser puro da lista (sem banco) |
 | `pdq.aliases` | normalização, vínculo exato, sugestões, aprendizado |
 | `pdq.postgame` | proposta, JSON, validação e confirmação |
+| `pdq.guest_lifecycle` | fila e decisão transacional de convidados |
 | `pdq.correction` | correção de partida confirmada (vínculo, status, seção, data, local, exclusão) |
 | `pdq.__main__` | CLI (`propose`, `confirm`, `relink`, `set-status`, `delete-session`, ...) |

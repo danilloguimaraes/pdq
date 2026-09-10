@@ -55,7 +55,7 @@ def test_schema_version_and_new_tables(tmp_path):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(attendance)")}
     assert {"note", "section"} <= cols
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
-    assert "padrinho" in cols
+    assert {"padrinho", "guest_status", "guest_decision_date"} <= cols
     conn.close()
 
 
@@ -156,14 +156,14 @@ def test_migrates_v2_database_adding_section(tmp_path):
     raw.close()
 
     conn = db.connect(path)
-    assert db.schema_version(conn) == 3
+    assert db.schema_version(conn) == 4
     rows = conn.execute("SELECT player_id, status, note, section FROM attendance ORDER BY 1")
     assert [tuple(r) for r in rows] == [(1, "X", "", ""), (2, "J", "entrou", "")]
     assert conn.execute("SELECT vagas_vazias FROM match_meta").fetchone()[0] == 2
     assert conn.execute("SELECT COUNT(*) FROM player_alias").fetchone()[0] == 1
     conn.close()
     conn = db.connect(path)  # reabrir é idempotente
-    assert db.schema_version(conn) == 3
+    assert db.schema_version(conn) == 4
     conn.close()
 
 
