@@ -56,7 +56,18 @@ def test_schema_version_and_new_tables(tmp_path):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(attendance)")}
     assert {"note", "section"} <= cols
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
-    assert {"padrinho", "padrinho_id", "guest_status", "guest_decision_date"} <= cols
+    assert {
+        "padrinho",
+        "padrinho_id",
+        "guest_status",
+        "guest_decision_date",
+        "canonical_player_id",
+    } <= cols
+    foreign_keys = {
+        (r["from"], r["table"], r["to"], r["on_delete"])
+        for r in conn.execute("PRAGMA foreign_key_list(player)")
+    }
+    assert ("canonical_player_id", "player", "id", "RESTRICT") in foreign_keys
     conn.close()
 
 
@@ -302,4 +313,87 @@ def test_completes_v4_database_created_by_a_single_epic(tmp_path, missing):
         "J",
         "reservas",
     )
+    conn.close()
+
+
+V4_SCHEMA = V3_SCHEMA + """
+CREATE TABLE payment (
+    id INTEGER PRIMARY KEY,
+    player_id INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    paid_on TEXT NOT NULL,
+    ref TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT ''
+);
+ALTER TABLE player ADD COLUMN guest_status TEXT NOT NULL DEFAULT '';
+ALTER TABLE player ADD COLUMN guest_decision_date TEXT NOT NULL DEFAULT '';
+INSERT INTO player_alias VALUES ('a', 1);
+INSERT INTO payment (player_id, amount_cents, paid_on) VALUES (1, 1500, '2025-01-03');
+PRAGMA user_version = 4;
+"""
+
+
+def test_migrates_v4_database_preserving_related_records(tmp_path):
+    path = tmp_path / "pdq.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(V4_SCHEMA)
+    raw.close()
+
+    conn = db.connect(path)
+    assert db.schema_version(conn) == 5
+    assert [tuple(r) for r in conn.execute("SELECT * FROM attendance")] == [
+        (1, 1, "J", "obs", "reservas")
+    ]
+    assert [tuple(r) for r in conn.execute("SELECT * FROM player_alias")] == [("a", 1)]
+    payments = conn.execute("SELECT player_id, amount_cents, paid_on FROM payment")
+    assert [tuple(r) for r in payments] == [(1, 1500, "2025-01-03")]
+    assert conn.execute("SELECT canonical_player_id FROM player WHERE id = 1").fetchone()[0] is None
+    conn.close()
+
+    conn = db.connect(path)
+    assert db.schema_version(conn) == 5
+    assert conn.execute("SELECT COUNT(*) FROM attendance").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM player_alias").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM payment").fetchone()[0] == 1
+    conn.close()
+
+
+def test_canonical_player_foreign_key_restricts_deletion(tmp_path):
+    conn = db.connect(tmp_path / "pdq.db")
+    conn.execute("INSERT INTO player (pos, name) VALUES (1, 'Original'), (2, 'Mesclado')")
+    conn.execute("UPDATE player SET canonical_player_id = 1 WHERE id = 2")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("DELETE FROM player WHERE id = 1")
+    conn.close()
+
+
+def test_resolves_canonical_identity_and_diagnostics():
+    conn = db.connect(":memory:")
+    conn.execute(
+        "INSERT INTO player (id, pos, name, canonical_player_id) VALUES "
+        "(1, 1, 'Canônico', NULL), (2, 2, 'Direto', 1), (3, 3, 'Cadeia', 2), "
+        "(4, 4, 'Ciclo A', 5), (5, 5, 'Ciclo B', 4), (6, 6, 'Próprio', 6)"
+    )
+    conn.commit()
+
+    assert db.resolve_canonical_player(conn, 1) == db.CanonicalIdentity(1, 1, (1,))
+    assert db.resolve_canonical_player(conn, 2) == db.CanonicalIdentity(2, 1, (2, 1))
+    assert db.resolve_canonical_player(conn, 3) == db.CanonicalIdentity(3, 1, (3, 2, 1))
+    assert db.resolve_canonical_player(conn, 4) == db.CanonicalIdentity(4, None, (4, 5, 4), "cycle")
+    assert db.resolve_canonical_player(conn, 6) == db.CanonicalIdentity(
+        6, None, (6, 6), "self_reference"
+    )
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute(
+        "INSERT INTO player (id, pos, name, canonical_player_id) VALUES (7, 7, 'Inválido', 99)"
+    )
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = ON")
+    assert db.resolve_canonical_player(conn, 7) == db.CanonicalIdentity(
+        7, None, (7, 99), "invalid_reference"
+    )
+    assert db.canonical_player_id(conn, 3) == 1
+    assert db.canonical_player_id(conn, 4) is None
+    assert [d.player_id for d in db.identity_diagnostics(conn)] == [2, 3, 4, 5, 6, 7]
     conn.close()
