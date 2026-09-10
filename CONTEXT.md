@@ -22,6 +22,14 @@ _Evitar_: "jogo", "rodada" no código.
 Pessoa cadastrada. `name` é preservado literalmente como na planilha;
 `legacy_id` é `AAMM` da primeira partida; `padrinho` é quem o apresentou.
 
+**Convidado** (`player.classe = C`, ou `-`/vazio herdado da planilha):
+Quem joga esporadicamente, em geral trazido por um padrinho. Jogadores criados
+pela confirmação nascem com classe `C` e, após a quarta presença (status `X` ou
+`J`), entram na fila de decisão: podem ser promovidos a frequente (`F`) ou
+mensalista (`M`), ou receber recusa, permanecendo convidados ou saindo (`-`)
+sem apagar o histórico. Convidado paga diária quando joga; a diária é dele, não
+do padrinho (ADR 0001). O padrinho aparece na cobrança apenas como referência.
+
 **Presença** (`attendance`, status `X`):
 O jogador estava na lista (goleiros ou linha) e foi.
 
@@ -87,23 +95,21 @@ _Evitar_: "editar no SQL", "ajuste manual".
 
 **Migração aditiva**:
 Evolução do schema que preserva dados e o comportamento do export legado,
-versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4).
+versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4 + E5,
+desenvolvidas em paralelo; a guarda de migração verifica `payment` e
+`player.guest_status`).
 
 **Classe** (`player.classe`):
 Como o jogador se relaciona com o Pdq, herdada da coluna CLASSE da planilha:
-`M` mensalista, `F` frequente, `-` ou vazio convidado. É o estado atual, não
-versionado: a cobrança deriva sempre da classe de hoje.
+`M` mensalista, `F` frequente, `C` convidado; `-` ou vazio é convidado legado
+(ou quem saiu após recusa). É o estado atual, não versionado: a cobrança deriva
+sempre da classe de hoje.
 
 **Mensalista** (classe `M`):
 Paga **mensalidade** por mês com partida, jogue ou não. Nunca paga diária.
 
 **Frequente** (classe `F`):
 Jogador habitual sem mensalidade. Paga **diária** quando joga (X ou J).
-
-**Convidado** (classe `-` ou vazia):
-Quem joga esporadicamente, em geral trazido por um padrinho. Paga diária quando
-joga; a diária é dele, não do padrinho (ADR 0001). O padrinho aparece na
-cobrança apenas como referência.
 
 **Diária** (`Charge` com `kind="diaria"`):
 R$ 15 devidos por partida por frequente ou convidado presente (X ou J). Furo
@@ -147,6 +153,7 @@ histórico de presença sem efeito financeiro.
 | `pdq.whatsapp` | parser puro da lista (sem banco) |
 | `pdq.aliases` | normalização, vínculo exato, sugestões, aprendizado |
 | `pdq.postgame` | proposta, JSON, validação e confirmação |
+| `pdq.guest_lifecycle` | fila e decisão transacional de convidados |
 | `pdq.correction` | correção de partida confirmada (vínculo, status, seção, data, local, exclusão) |
 | `pdq.finance` | cobranças derivadas (diária, mensalidade), pagamentos e saldo |
 | `pdq.__main__` | CLI (`propose`, `confirm`, `relink`, `set-status`, `charges`, `pay`, `balance`, ...) |

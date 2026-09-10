@@ -55,7 +55,7 @@ def test_schema_version_and_new_tables(tmp_path):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(attendance)")}
     assert {"note", "section"} <= cols
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
-    assert "padrinho" in cols
+    assert {"padrinho", "guest_status", "guest_decision_date"} <= cols
     conn.close()
 
 
@@ -157,6 +157,9 @@ def test_migrates_v2_database_adding_section_and_payment(tmp_path):
 
     conn = db.connect(path)
     assert db.schema_version(conn) == db.SCHEMA_VERSION == 4
+    assert {"guest_status", "guest_decision_date"} <= {
+        r["name"] for r in conn.execute("PRAGMA table_info(player)")
+    }
     rows = conn.execute("SELECT player_id, status, note, section FROM attendance ORDER BY 1")
     assert [tuple(r) for r in rows] == [(1, "X", "", ""), (2, "J", "entrou", "")]
     assert conn.execute("SELECT vagas_vazias FROM match_meta").fetchone()[0] == 2
@@ -261,4 +264,40 @@ def test_migrates_v3_database_adding_payment(tmp_path):
     conn = db.connect(path)  # reabrir é idempotente
     assert db.schema_version(conn) == 4
     assert conn.execute("SELECT COUNT(*) FROM payment").fetchone()[0] == 1
+    conn.close()
+
+
+@pytest.mark.parametrize("missing", ["payment", "guest"])
+def test_completes_v4_database_created_by_a_single_epic(tmp_path, missing):
+    """E4 e E5 nasceram em paralelo sob a versão 4: a guarda cobre um banco que só tem uma delas."""
+    path = tmp_path / "pdq.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(V3_SCHEMA)
+    if missing == "payment":  # banco criado só pela E5
+        raw.executescript(
+            "ALTER TABLE player ADD COLUMN guest_status TEXT NOT NULL DEFAULT '';"
+            "ALTER TABLE player ADD COLUMN guest_decision_date TEXT NOT NULL DEFAULT '';"
+        )
+    else:  # banco criado só pela E4
+        raw.executescript(
+            "CREATE TABLE payment (id INTEGER PRIMARY KEY, player_id INTEGER NOT NULL "
+            "REFERENCES player(id) ON DELETE CASCADE, amount_cents INTEGER NOT NULL "
+            "CHECK (amount_cents > 0), paid_on TEXT NOT NULL, ref TEXT NOT NULL DEFAULT '', "
+            "note TEXT NOT NULL DEFAULT '');"
+        )
+    raw.execute("PRAGMA user_version = 4")
+    raw.commit()
+    raw.close()
+
+    conn = db.connect(path)
+    assert db.schema_version(conn) == 4
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
+    assert {"guest_status", "guest_decision_date"} <= cols
+    conn.execute(
+        "INSERT INTO payment (player_id, amount_cents, paid_on) VALUES (1, 1500, '2025-01-03')"
+    )
+    assert tuple(conn.execute("SELECT status, section FROM attendance").fetchone()) == (
+        "J",
+        "reservas",
+    )
     conn.close()

@@ -27,6 +27,9 @@ python -m pdq --help
 | `pdq verify-backup [DIR]` | confere a integridade de um backup |
 | `pdq propose LISTA [-o ARQ] [--date] [--venue]` | lê a lista do WhatsApp e gera a proposta de presenças (JSON) |
 | `pdq confirm PROPOSTA [--dry-run]` | grava a partida a partir da proposta revisada |
+| `pdq guest-queue` | lista convidados com quatro presenças aguardando decisão |
+| `pdq promote-guest JOGADOR {F,M} DATA` | promove convidado pendente com a data da decisão |
+| `pdq decline-guest JOGADOR DATA {--keep-guest,--leaves}` | registra recusa mantendo o convidado ou sua saída |
 | `pdq show-session DATA` | mostra uma partida gravada e suas presenças |
 | `pdq relink DATA ERRADO CERTO [--alias GRAFIA]` | troca o jogador vinculado a uma presença |
 | `pdq set-status DATA JOGADOR {X,F,J,-}` | alterna presença / furo / jogou / não jogou |
@@ -85,6 +88,20 @@ sessão, `match_meta` (vagas vazias, texto original), presenças com observaçã
 jogadores novos (`legacy_id` = AAMM da partida) e aliases aprendidos, que fazem a
 próxima lista casar sozinha.
 
+## Ciclo de vida do convidado
+
+Todo jogador criado por `confirm` começa como convidado (`classe C`). A quarta
+presença, seja `X` ou `J`, o coloca na fila de decisão; `F` e `-` não contam.
+O comando não altera a planilha legada além da classe do jogador, e uma recusa
+que registra saída preserva jogador, presenças e aliases para manter o histórico.
+
+```sh
+python -m pdq guest-queue
+python -m pdq promote-guest 'João Pedro' F 2025-09-10
+python -m pdq decline-guest 42 2025-09-10 --keep-guest
+python -m pdq decline-guest 42 2025-09-10 --leaves
+```
+
 ## Correção de partida
 
 Errou depois de confirmar? Toda correção localiza a sessão pela data, valida e
@@ -117,7 +134,7 @@ Só os pagamentos entram no banco (`payment`).
 |--------|------|----------|
 | `M` mensalista | paga por mês | mensalidade em todo mês com partida (padrão R$ 60, `--mensalidade`) |
 | `F` frequente | habitual sem mensalidade | diária R$ 15 por partida em que jogou (`X`/`J`) |
-| `-`/vazio convidado | esporádico, trazido por padrinho | diária R$ 15; a dívida é do convidado, o padrinho sai como referência ([ADR 0001](docs/adr/0001-diaria-do-convidado.md)) |
+| `C` convidado (ou `-`/vazio herdado da planilha) | esporádico, trazido por padrinho | diária R$ 15; a dívida é do convidado, o padrinho sai como referência ([ADR 0001](docs/adr/0001-diaria-do-convidado.md)) |
 
 ```sh
 python -m pdq charges                              # diárias da última partida + mensalidades do mês
@@ -142,7 +159,7 @@ esse comportamento e gera bytes idênticos ao original; sem a flag, apenas as
 
 ## Modelo de dados
 
-- `player(pos, classe, posicao, legacy_id, name)`: uma linha por jogador, `pos` é a
+- `player(pos, classe, posicao, legacy_id, name, guest_status, guest_decision_date)`: uma linha por jogador, `pos` é a
   ordem na planilha. Textos preservados literalmente.
 - `session(ordem, date, venue)`: `ordem` 1 = sessão mais recente; `date` em ISO 8601.
 - `attendance(player_id, session_id, status, note, section)`: `status` em `X` (presente),
@@ -158,7 +175,7 @@ esse comportamento e gera bytes idênticos ao original; sem a flag, apenas as
   `ref` é a partida (`AAAA-MM-DD`) ou o mês (`AAAA-MM`) a que se refere.
 
 Faltas e Presenças (por jogador e por sessão) são derivados e recalculados na exportação.
-O schema é versionado por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4); bancos antigos
+O schema é versionado por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4 + E5); bancos antigos
 são migrados automaticamente ao abrir, sem perda de dados. Consulte `CONTEXT.md` para o vocabulário.
 
 ## Desenvolvimento

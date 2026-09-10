@@ -5,7 +5,7 @@ Data: 2026-09-09 · Status: aceita · Issue: E4 · Financeiro (#5)
 ## Contexto
 
 Cada partida gera diárias (R$ 15) para quem jogou sem ser mensalista: frequentes
-(classe `F`) e convidados (classe `-` ou vazia). O convidado chega ao grupo por um
+(classe `F`) e convidados (classe `C`, ou `-`/vazia herdada da planilha). O convidado chega ao grupo por um
 padrinho, anotado na lista (`(padrinho: X)`, `- conv. X`) e gravado em
 `player.padrinho`. Na hora da cobrança surge a dúvida de quem responde pela
 diária do convidado: ele próprio ou quem o trouxe (B3.4).

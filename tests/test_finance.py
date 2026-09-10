@@ -56,6 +56,19 @@ def test_convidado_owes_his_own_diaria_with_padrinho_as_reference(conn):
     assert freq.padrinho == ""  # frequente não exibe padrinho
 
 
+def test_guest_created_by_confirmation_is_convidado(conn):
+    """E5 cria convidados com classe C: pagam diária e exibem o padrinho como referência."""
+    conn.execute(
+        "INSERT INTO player (id, pos, classe, name, padrinho, guest_status) "
+        "VALUES (7, 7, 'C', 'NOVO', 'Freq', 'pending')"
+    )
+    conn.execute("INSERT INTO attendance (player_id, session_id, status) VALUES (7, 12, 'J')")
+    conn.commit()
+    novo = next(c for c in finance.charges_for_session(conn, "2025-09-11") if c.player_id == 7)
+    assert (novo.kind, novo.amount_cents, novo.padrinho) == ("diaria", 1500, "Freq")
+    assert finance.classe_label("C") == "convidado"
+
+
 def test_charges_for_month_mensalidades(conn):
     aug = finance.charges_for_month(conn, "2025-08")
     assert [(c.player_name, c.kind, c.ref, c.amount_cents) for c in aug] == [

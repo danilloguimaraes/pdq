@@ -10,7 +10,10 @@ Versões do schema (PRAGMA user_version):
      player_alias, match_meta). Migração aditiva e idempotente.
 - 3: correção de partida E2 (attendance.section: seção da lista em que o
      jogador estava). Aditiva; linhas antigas ficam com seção vazia.
-- 4: financeiro E4 (tabela payment). Migração aditiva e idempotente.
+- 4: financeiro E4 (tabela payment) e ciclo de vida E5 (classe C,
+     player.guest_status e guest_decision_date). Aditiva e idempotente; a
+     guarda de migração verifica as duas épicas, pois foram desenvolvidas em
+     paralelo sob o mesmo número.
 """
 
 from __future__ import annotations
@@ -36,6 +39,21 @@ SECTIONS = (SECTION_GOALKEEPERS, SECTION_FIELD, SECTION_RESERVES)
 
 SCHEMA_VERSION = 4
 
+CLASS_GUEST = "C"
+CLASS_FREQUENT = "F"
+CLASS_MONTHLY = "M"
+CLASS_INACTIVE = "-"
+GUEST_PENDING = "pending"
+GUEST_PROMOTED = "promoted"
+GUEST_DECLINED_STAYS = "declined_stays"
+GUEST_DECLINED_LEAVES = "declined_leaves"
+GUEST_STATUSES = (
+    GUEST_PENDING,
+    GUEST_PROMOTED,
+    GUEST_DECLINED_STAYS,
+    GUEST_DECLINED_LEAVES,
+)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS player (
     id       INTEGER PRIMARY KEY,
@@ -44,7 +62,10 @@ CREATE TABLE IF NOT EXISTS player (
     posicao  TEXT    NOT NULL DEFAULT '',  -- POSICAO (L, G, '')
     legacy_id TEXT   NOT NULL DEFAULT '',  -- ID da planilha (não único)
     name     TEXT    NOT NULL,             -- JOGADORES (preservado byte a byte)
-    padrinho TEXT    NOT NULL DEFAULT ''   -- quem apresentou o jogador ao grupo
+    padrinho TEXT    NOT NULL DEFAULT '',  -- quem apresentou o jogador ao grupo
+    guest_status TEXT NOT NULL DEFAULT '' CHECK (guest_status IN
+        ('', 'pending', 'promoted', 'declined_stays', 'declined_leaves')),
+    guest_decision_date TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS session (
@@ -127,12 +148,13 @@ def _table_sql(conn: sqlite3.Connection, table: str) -> str:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Leva um banco das versões 1 (E0), 2 (E1) ou 3 (E2) para a versão 4 (E4) sem perder dados."""
+    """Leva bancos de versões anteriores ao schema atual sem perder dados."""
     if (
         schema_version(conn) >= SCHEMA_VERSION
         and "'J'" in _table_sql(conn, "attendance")
         and "section" in _columns(conn, "attendance")
         and _table_sql(conn, "payment")
+        and {"guest_status", "guest_decision_date"} <= _columns(conn, "player")
     ):
         return
 
@@ -164,6 +186,15 @@ def migrate(conn: sqlite3.Connection) -> None:
 
     if "section" not in _columns(conn, "attendance"):
         conn.execute("ALTER TABLE attendance ADD COLUMN section TEXT NOT NULL DEFAULT ''")
+
+    if "guest_status" not in _columns(conn, "player"):
+        conn.execute(
+            "ALTER TABLE player ADD COLUMN guest_status TEXT NOT NULL DEFAULT '' "
+            "CHECK (guest_status IN ('', 'pending', 'promoted', 'declined_stays', "
+            "'declined_leaves'))"
+        )
+    if "guest_decision_date" not in _columns(conn, "player"):
+        conn.execute("ALTER TABLE player ADD COLUMN guest_decision_date TEXT NOT NULL DEFAULT ''")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 

@@ -3,8 +3,9 @@
 Regras (ver docs/adr/0001-diaria-do-convidado.md):
 
 - Diária (R$ 15) por partida para quem jogou (status X ou J) sem ser mensalista:
-  frequentes (classe F) e convidados (classe '-' ou vazia). A diária do convidado
-  é devida pelo próprio convidado; o padrinho sai só como referência.
+  frequentes (classe F) e convidados (classe C, ou '-'/vazia herdada da planilha).
+  A diária do convidado é devida pelo próprio convidado; o padrinho sai só como
+  referência.
 - Mensalidade por mês com partida para mensalistas (classe M), a partir do mês do
   primeiro registro (X/F/J) do jogador. Mensalista sem registro não é cobrado.
 - Cobranças não são armazenadas: são recalculadas a partir do banco. Só os
@@ -25,9 +26,9 @@ from pdq import aliases, db
 DIARIA_CENTAVOS = 1500
 MENSALIDADE_CENTAVOS = 6000  # padrão; ajustável na CLI (--mensalidade)
 
-CLASSE_MENSALISTA = "M"
-CLASSE_FREQUENTE = "F"
-CLASSES_CONVIDADO = ("-", "")
+CLASSE_MENSALISTA = db.CLASS_MONTHLY
+CLASSE_FREQUENTE = db.CLASS_FREQUENT
+CLASSES_CONVIDADO = (db.CLASS_GUEST, db.CLASS_INACTIVE, "")
 
 KIND_DIARIA = "diaria"
 KIND_MENSALIDADE = "mensalidade"

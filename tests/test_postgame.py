@@ -228,9 +228,12 @@ def test_confirm_creates_new_player_with_editable_name_and_padrinho(conn):
 
     assert res.created_players == ["JOAO PEDRO (CONVIDADO DANILLO)", "PEDRÃO"]
     rows = conn.execute("SELECT * FROM player WHERE pos > 13 ORDER BY pos").fetchall()
-    assert [(r["pos"], r["name"], r["padrinho"], r["posicao"], r["legacy_id"]) for r in rows] == [
-        (14, "JOAO PEDRO (CONVIDADO DANILLO)", "Danillo", "L", "2509"),
-        (15, "PEDRÃO", "Rodrigo", "L", "2509"),
+    assert [
+        (r["pos"], r["name"], r["classe"], r["padrinho"], r["posicao"], r["legacy_id"])
+        for r in rows
+    ] == [
+        (14, "JOAO PEDRO (CONVIDADO DANILLO)", "C", "Danillo", "L", "2509"),
+        (15, "PEDRÃO", "C", "Rodrigo", "L", "2509"),
     ]
     # apelido escrito na lista aprendido para o jogador novo
     assert aliases.Resolver.from_db(conn).exact("Joãozinho") == rows[0]["id"]
