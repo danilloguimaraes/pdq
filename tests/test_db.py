@@ -53,7 +53,7 @@ def test_schema_version_and_new_tables(tmp_path):
     assert {"player_alias", "match_meta"} <= tables
     assert db.schema_version(conn) == db.SCHEMA_VERSION
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(attendance)")}
-    assert "note" in cols
+    assert {"note", "section"} <= cols
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(player)")}
     assert "padrinho" in cols
     conn.close()
@@ -90,9 +90,15 @@ def test_migrates_v1_database_preserving_data(tmp_path):
 
     conn = db.connect(path)
     assert db.schema_version(conn) == db.SCHEMA_VERSION
-    rows = conn.execute("SELECT player_id, session_id, status, note FROM attendance ORDER BY 1, 2")
-    assert [tuple(r) for r in rows] == [(1, 1, "X", ""), (1, 2, "-", ""), (2, 1, "F", "")]
-    conn.execute("INSERT INTO attendance VALUES (2, 2, 'J', 'entrou no 2º tempo')")
+    rows = conn.execute(
+        "SELECT player_id, session_id, status, note, section FROM attendance ORDER BY 1, 2"
+    )
+    assert [tuple(r) for r in rows] == [
+        (1, 1, "X", "", ""),
+        (1, 2, "-", "", ""),
+        (2, 1, "F", "", ""),
+    ]
+    conn.execute("INSERT INTO attendance VALUES (2, 2, 'J', 'entrou no 2º tempo', 'reservas')")
     conn.execute("UPDATE player SET padrinho = 'A' WHERE id = 2")
     conn.execute("INSERT INTO player_alias VALUES ('bezinho', 2)")
     conn.execute("INSERT INTO match_meta (session_id, vagas_vazias) VALUES (1, 2)")
@@ -105,6 +111,59 @@ def test_migrates_v1_database_preserving_data(tmp_path):
     assert (
         conn.execute("SELECT player_id FROM player_alias WHERE alias='bezinho'").fetchone()[0] == 2
     )
+    conn.close()
+
+
+V2_SCHEMA = """
+CREATE TABLE player (
+    id INTEGER PRIMARY KEY, pos INTEGER NOT NULL UNIQUE, classe TEXT NOT NULL DEFAULT '',
+    posicao TEXT NOT NULL DEFAULT '', legacy_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL,
+    padrinho TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE session (
+    id INTEGER PRIMARY KEY, ordem INTEGER NOT NULL UNIQUE, date TEXT NOT NULL UNIQUE,
+    venue TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE attendance (
+    player_id INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE,
+    session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('X', 'F', '-', 'J')),
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (player_id, session_id)
+);
+CREATE INDEX idx_attendance_session ON attendance(session_id);
+CREATE TABLE player_alias (
+    alias TEXT PRIMARY KEY, player_id INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE
+);
+CREATE TABLE match_meta (
+    session_id INTEGER PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+    vagas_vazias INTEGER NOT NULL DEFAULT 0, observacao TEXT NOT NULL DEFAULT '',
+    raw_list TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO player (pos, name) VALUES (1, 'A'), (2, 'B');
+INSERT INTO session (ordem, date, venue) VALUES (1, '2025-01-02', 'Fair Play');
+INSERT INTO attendance VALUES (1, 1, 'X', ''), (2, 1, 'J', 'entrou');
+INSERT INTO player_alias VALUES ('bezinho', 2);
+INSERT INTO match_meta (session_id, vagas_vazias) VALUES (1, 2);
+PRAGMA user_version = 2;
+"""
+
+
+def test_migrates_v2_database_adding_section(tmp_path):
+    path = tmp_path / "pdq.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(V2_SCHEMA)
+    raw.close()
+
+    conn = db.connect(path)
+    assert db.schema_version(conn) == 3
+    rows = conn.execute("SELECT player_id, status, note, section FROM attendance ORDER BY 1")
+    assert [tuple(r) for r in rows] == [(1, "X", "", ""), (2, "J", "entrou", "")]
+    assert conn.execute("SELECT vagas_vazias FROM match_meta").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM player_alias").fetchone()[0] == 1
+    conn.close()
+    conn = db.connect(path)  # reabrir é idempotente
+    assert db.schema_version(conn) == 3
     conn.close()
 
 

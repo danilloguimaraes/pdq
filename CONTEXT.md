@@ -34,7 +34,13 @@ O jogador estava na seção Reservas e entrou. Conta como presença na planilha
 (exportado como `X`), mas o banco preserva a distinção.
 
 **Sem registro** (status `-`):
-O jogador não estava na lista daquela sessão.
+O jogador não estava na lista daquela sessão. Após uma correção, também
+representa **não jogou**: estava listado (em geral nas Reservas) e não entrou; a
+linha e sua seção são preservadas. A planilha não distingue os dois casos.
+
+**Seção** (`attendance.section`):
+Onde o jogador estava na lista: `goleiros`, `linha` ou `reservas`. Persistida
+desde a E2 (schema 3); vazia nas linhas importadas da planilha.
 
 **Lista** (do WhatsApp):
 Texto colado da mensagem de convocação. Tem título (data/local), seções
@@ -72,9 +78,16 @@ Decisão de vínculo de uma entrada da proposta: `link` (usa `player_id`),
 Gravação atômica da proposta: sessão, `match_meta`, presenças, jogadores novos e
 aliases. Recusa pendências e datas já registradas.
 
+**Correção** (`correction`):
+Ajuste transacional numa sessão já confirmada, localizada pela data:
+revincular (`relink`), alternar status (`set-status`), seção (`set-section`),
+data (`set-date`, renumera) e local (`set-venue`), ou excluir (`delete-session`,
+exige confirmação explícita). Nunca altera o layout do export legado.
+_Evitar_: "editar no SQL", "ajuste manual".
+
 **Migração aditiva**:
 Evolução do schema que preserva dados e o comportamento do export legado,
-versionada por `PRAGMA user_version` (1 = E0, 2 = E1).
+versionada por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2).
 
 ## Módulos
 
@@ -86,4 +99,5 @@ versionada por `PRAGMA user_version` (1 = E0, 2 = E1).
 | `pdq.whatsapp` | parser puro da lista (sem banco) |
 | `pdq.aliases` | normalização, vínculo exato, sugestões, aprendizado |
 | `pdq.postgame` | proposta, JSON, validação e confirmação |
-| `pdq.__main__` | CLI (`propose`, `confirm`, ...) |
+| `pdq.correction` | correção de partida confirmada (vínculo, status, seção, data, local, exclusão) |
+| `pdq.__main__` | CLI (`propose`, `confirm`, `relink`, `set-status`, `delete-session`, ...) |
