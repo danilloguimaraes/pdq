@@ -70,11 +70,15 @@ class Resolver:
         self.cutoff = cutoff
         self.max_suggestions = max_suggestions
         self._exact: dict[str, set[int]] = {}
+        self._references: dict[str, set[int]] = {}
         self._core: dict[str, set[int]] = {}
         for pid, name in self.players.items():
-            self._exact.setdefault(normalize(name), set()).add(pid)
+            key = normalize(name)
+            self._exact.setdefault(key, set()).add(pid)
+            self._references.setdefault(key, set()).add(pid)
             self._core.setdefault(core(name), set()).add(pid)
         for alias, pid in self.aliases.items():
+            self._references.setdefault(normalize(alias), set()).add(pid)
             self._core.setdefault(core(alias), set()).add(pid)
 
     @classmethod
@@ -111,6 +115,17 @@ class Resolver:
         key = normalize(name)
         ids = self._exact.get(key, ())
         return set(ids) if key else set()
+
+    def reference_candidates(self, reference: str) -> set[int]:
+        """Retorna nomes e aliases que correspondem exatamente à referência normalizada.
+
+        Diferente de :meth:`exact`, esta consulta não escolhe silenciosamente
+        um alias quando ele colide com o nome de outro jogador. É apropriada
+        para operações administrativas, que devem tornar essa ambiguidade
+        explícita para a curadoria.
+        """
+        key = normalize(reference)
+        return set(self._references.get(key, ())) if key else set()
 
     def suggest(self, name: str) -> list[Suggestion]:
         query = core(name) or normalize(name)
