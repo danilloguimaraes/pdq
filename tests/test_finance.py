@@ -1,6 +1,6 @@
 import pytest
 
-from pdq import db, finance
+from pdq import correction, db, finance
 
 
 @pytest.fixture
@@ -108,6 +108,29 @@ def test_record_payment_and_balance(conn):
     pending = [b.player_name for b in finance.balances(conn, only_pending=True)]
     assert pending == ["MENSAL", "CONV", "CONV SEM CLASSE", "MENSAL NOVO"]
     assert finance.balance_of(conn, 6).saldo_cents == 0
+
+
+def test_correction_updates_derived_charges_but_keeps_payments(conn):
+    """Cobrança é derivada: corrigir a presença corrige o saldo; pagamentos ficam."""
+    finance.record_payment(conn, 2, 1500, "2025-09-05", ref="2025-09-11")
+    assert finance.balance_of(conn, 2).saldo_cents == 1500  # FREQ: 3 diárias - 1 paga
+
+    # furo -> presença: FREQ passa a dever a diária de 04/09
+    correction.set_status(conn, "2025-09-04", 2, db.STATUS_PRESENT)
+    assert finance.balance_of(conn, 2).saldo_cents == 3000
+
+    # a presença de 28/08 era de outro jogador (relink): a cobrança muda de dono, o pagamento não
+    correction.relink(conn, "2025-08-28", 2, 6)
+    assert finance.balance_of(conn, 2).saldo_cents == 1500
+    # mensalista que passa a ter registro em agosto deve as mensalidades de ago e set
+    assert finance.balance_of(conn, 6).charged_cents == 2 * finance.MENSALIDADE_CENTAVOS
+    assert [x.amount_cents for x in finance.payments(conn, 2)] == [1500]
+
+    # excluir a partida remove as cobranças dela; agosto deixa de ter mensalidade
+    correction.delete_session(conn, "2025-08-28", confirm=True)
+    assert finance.balance_of(conn, 6).charged_cents == 0
+    assert finance.balance_of(conn, 1).charged_cents == finance.MENSALIDADE_CENTAVOS
+    assert conn.execute("SELECT COUNT(*) FROM payment").fetchone()[0] == 1
 
 
 def test_record_payment_validation(conn):

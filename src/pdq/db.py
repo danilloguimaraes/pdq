@@ -8,7 +8,9 @@ Versões do schema (PRAGMA user_version):
 - 1: fundação E0 (player, session, attendance com X/F/-).
 - 2: registro pós-jogo E1 (status J, attendance.note, player.padrinho,
      player_alias, match_meta). Migração aditiva e idempotente.
-- 3: financeiro E4 (tabela payment). Migração aditiva e idempotente.
+- 3: correção de partida E2 (attendance.section: seção da lista em que o
+     jogador estava). Aditiva; linhas antigas ficam com seção vazia.
+- 4: financeiro E4 (tabela payment). Migração aditiva e idempotente.
 """
 
 from __future__ import annotations
@@ -27,7 +29,12 @@ STATUSES = (STATUS_PRESENT, STATUS_ABSENT, STATUS_NONE, STATUS_PLAYED)
 # Na planilha legada só existem X/F/-; "J" conta como presença ao exportar.
 LEGACY_STATUS = {STATUS_PLAYED: STATUS_PRESENT}
 
-SCHEMA_VERSION = 3
+SECTION_GOALKEEPERS = "goleiros"
+SECTION_FIELD = "linha"
+SECTION_RESERVES = "reservas"
+SECTIONS = (SECTION_GOALKEEPERS, SECTION_FIELD, SECTION_RESERVES)
+
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS player (
@@ -52,6 +59,7 @@ CREATE TABLE IF NOT EXISTS attendance (
     session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
     status     TEXT NOT NULL CHECK (status IN ('X', 'F', '-', 'J')),
     note       TEXT NOT NULL DEFAULT '',   -- observação da linha da lista
+    section    TEXT NOT NULL DEFAULT '',   -- goleiros | linha | reservas | '' (legado)
     PRIMARY KEY (player_id, session_id)
 );
 
@@ -119,8 +127,13 @@ def _table_sql(conn: sqlite3.Connection, table: str) -> str:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Leva um banco das versões 1 (E0) ou 2 (E1) para a versão 3 (E4) sem perder dados."""
-    if schema_version(conn) >= SCHEMA_VERSION and "'J'" in _table_sql(conn, "attendance"):
+    """Leva um banco das versões 1 (E0), 2 (E1) ou 3 (E2) para a versão 4 (E4) sem perder dados."""
+    if (
+        schema_version(conn) >= SCHEMA_VERSION
+        and "'J'" in _table_sql(conn, "attendance")
+        and "section" in _columns(conn, "attendance")
+        and _table_sql(conn, "payment")
+    ):
         return
 
     # E4: a tabela payment já foi criada por SCHEMA (CREATE TABLE IF NOT EXISTS).
@@ -148,6 +161,9 @@ def migrate(conn: sqlite3.Connection) -> None:
             """
         )
         conn.execute("PRAGMA foreign_keys = ON")
+
+    if "section" not in _columns(conn, "attendance"):
+        conn.execute("ALTER TABLE attendance ADD COLUMN section TEXT NOT NULL DEFAULT ''")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 

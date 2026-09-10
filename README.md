@@ -27,6 +27,13 @@ python -m pdq --help
 | `pdq verify-backup [DIR]` | confere a integridade de um backup |
 | `pdq propose LISTA [-o ARQ] [--date] [--venue]` | lê a lista do WhatsApp e gera a proposta de presenças (JSON) |
 | `pdq confirm PROPOSTA [--dry-run]` | grava a partida a partir da proposta revisada |
+| `pdq show-session DATA` | mostra uma partida gravada e suas presenças |
+| `pdq relink DATA ERRADO CERTO [--alias GRAFIA]` | troca o jogador vinculado a uma presença |
+| `pdq set-status DATA JOGADOR {X,F,J,-}` | alterna presença / furo / jogou / não jogou |
+| `pdq set-section DATA JOGADOR {goleiros,linha,reservas}` | corrige a seção da lista |
+| `pdq set-date DATA NOVA_DATA` | move a partida de data (renumera a ordem) |
+| `pdq set-venue DATA LOCAL` | corrige o local |
+| `pdq delete-session DATA [--yes]` | exclui a partida (sem `--yes` só mostra o que sairia) |
 | `pdq charges [--date] [--month] [--all] [--since] [--mensalidade]` | cobranças da partida (diárias) e do mês (mensalidades) |
 | `pdq pay JOGADOR VALOR [--on] [--ref] [--note]` | registra um pagamento |
 | `pdq balance [JOGADOR] [--all] [--since] [--mensalidade]` | pendências, ou saldo detalhado de um jogador |
@@ -78,6 +85,29 @@ sessão, `match_meta` (vagas vazias, texto original), presenças com observaçã
 jogadores novos (`legacy_id` = AAMM da partida) e aliases aprendidos, que fazem a
 próxima lista casar sozinha.
 
+## Correção de partida
+
+Errou depois de confirmar? Toda correção localiza a sessão pela data, valida e
+grava numa única transação; nada de SQL manual. Jogadores podem ser indicados
+por id, nome exato ou alias aprendido.
+
+```sh
+python -m pdq show-session 2025-09-04
+python -m pdq relink 2025-09-04 'Gustavo Bastos' 'Gustavo Oliveira' --alias Gustavo
+python -m pdq set-status 2025-09-04 Danillo X        # F -> X
+python -m pdq set-status 2025-09-04 Saulo -          # reserva listado que não jogou
+python -m pdq set-section 2025-09-04 Saulo linha
+python -m pdq set-date 2025-09-04 2025-09-05         # renumera `ordem`
+python -m pdq set-venue 2025-09-05 'Bora Bola'
+python -m pdq delete-session 2025-09-05              # mostra e sai com 1
+python -m pdq delete-session 2025-09-05 --yes        # exclui presenças e match_meta; jogadores ficam
+```
+
+`relink` preserva status, seção e observação da linha; com `--alias`, a grafia da
+lista passa a apontar para o jogador certo nas próximas propostas. O status `-`
+mantém a linha (o jogador estava na lista) mas é "sem registro" na planilha, e a
+seção não é exportada: o export legado continua byte a byte.
+
 ## Financeiro
 
 As cobranças não são gravadas: são derivadas de presença + classe a cada consulta.
@@ -100,6 +130,8 @@ python -m pdq balance Rodrigo                      # cobranças e pagamentos del
 `JOGADOR` aceita id, nome da planilha ou alias aprendido. Como a planilha legada
 traz anos de histórico, use `--since AAAA-MM` para começar a contabilidade num mês
 (cobranças anteriores são ignoradas). Saldo positivo é pendência, negativo é crédito.
+Como a cobrança é derivada, uma correção de partida (`set-status`, `relink`,
+`delete-session`) ajusta o saldo automaticamente; os pagamentos ficam intactos.
 
 ## Exportação e a inconsistência da planilha
 
@@ -113,9 +145,10 @@ esse comportamento e gera bytes idênticos ao original; sem a flag, apenas as
 - `player(pos, classe, posicao, legacy_id, name)`: uma linha por jogador, `pos` é a
   ordem na planilha. Textos preservados literalmente.
 - `session(ordem, date, venue)`: `ordem` 1 = sessão mais recente; `date` em ISO 8601.
-- `attendance(player_id, session_id, status, note)`: `status` em `X` (presente), `F` (furo),
-  `J` (reserva que jogou; exportado como `X`), `-` (sem registro); imposto por `CHECK`.
-  `note` guarda a observação da linha da lista.
+- `attendance(player_id, session_id, status, note, section)`: `status` em `X` (presente),
+  `F` (furo), `J` (reserva que jogou; exportado como `X`), `-` (sem registro / listado que
+  não jogou); imposto por `CHECK`. `note` guarda a observação da linha da lista e `section`
+  a seção (`goleiros`, `linha`, `reservas`; vazia nas linhas importadas da planilha).
 - `player.padrinho`: quem apresentou o jogador (texto da lista).
 - `player_alias(alias, player_id)`: apelidos normalizados (sem acento/caixa/pontuação)
   aprendidos nas confirmações.
@@ -125,8 +158,8 @@ esse comportamento e gera bytes idênticos ao original; sem a flag, apenas as
   `ref` é a partida (`AAAA-MM-DD`) ou o mês (`AAAA-MM`) a que se refere.
 
 Faltas e Presenças (por jogador e por sessão) são derivados e recalculados na exportação.
-O schema é versionado por `PRAGMA user_version`; bancos anteriores (versões 1 e 2) são migrados
-automaticamente ao abrir, sem perda de dados. Consulte `CONTEXT.md` para o vocabulário.
+O schema é versionado por `PRAGMA user_version` (1 = E0, 2 = E1, 3 = E2, 4 = E4); bancos antigos
+são migrados automaticamente ao abrir, sem perda de dados. Consulte `CONTEXT.md` para o vocabulário.
 
 ## Desenvolvimento
 
