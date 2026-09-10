@@ -14,7 +14,9 @@ Versões do schema (PRAGMA user_version):
      player.guest_status e guest_decision_date). Aditiva e idempotente; a
      guarda de migração verifica as duas épicas, pois foram desenvolvidas em
      paralelo sob o mesmo número.
-- 5: higiene E3 (player.padrinho_id, vínculo estruturado ao padrinho).
+- 5: identidade canônica (player.padrinho_id e player.canonical_player_id).
+     Referências canônicas preservam os registros originais de player e
+     attendance.
 """
 
 from __future__ import annotations
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS player (
     name     TEXT    NOT NULL,             -- JOGADORES (preservado byte a byte)
     padrinho TEXT    NOT NULL DEFAULT '',  -- texto histórico de quem apresentou
     padrinho_id INTEGER REFERENCES player(id) ON DELETE SET NULL,
+    canonical_player_id INTEGER REFERENCES player(id) ON DELETE RESTRICT,
     guest_status TEXT NOT NULL DEFAULT '' CHECK (guest_status IN
         ('', 'pending', 'promoted', 'declined_stays', 'declined_leaves')),
     guest_decision_date TEXT NOT NULL DEFAULT ''
@@ -158,6 +161,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         and _table_sql(conn, "payment")
         and {"guest_status", "guest_decision_date"} <= _columns(conn, "player")
         and "padrinho_id" in _columns(conn, "player")
+        and "canonical_player_id" in _columns(conn, "player")
     ):
         return
 
@@ -169,6 +173,11 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE player ADD COLUMN padrinho_id INTEGER "
             "REFERENCES player(id) ON DELETE SET NULL"
+        )
+    if "canonical_player_id" not in _columns(conn, "player"):
+        conn.execute(
+            "ALTER TABLE player ADD COLUMN canonical_player_id "
+            "INTEGER REFERENCES player(id) ON DELETE RESTRICT"
         )
 
     if "'J'" not in _table_sql(conn, "attendance") or "note" not in _columns(conn, "attendance"):
@@ -205,6 +214,23 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE player ADD COLUMN guest_decision_date TEXT NOT NULL DEFAULT ''")
 
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def canonical_player_id(conn: sqlite3.Connection, player_id: int) -> int | None:
+    """Retorna a raiz canônica, ou None para ciclos e referências inválidas."""
+    seen: set[int] = set()
+    current = player_id
+    while current not in seen:
+        seen.add(current)
+        row = conn.execute(
+            "SELECT canonical_player_id FROM player WHERE id = ?", (current,)
+        ).fetchone()
+        if row is None:
+            return None
+        if row["canonical_player_id"] is None:
+            return current
+        current = row["canonical_player_id"]
+    return None
 
 
 def clear_all(conn: sqlite3.Connection) -> None:

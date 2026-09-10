@@ -16,6 +16,7 @@ def conn(tmp_path):
             (4, "F", "L", "2406", "GUSTAVO OLIVEIRA"),
             (5, "F", "G", "2302", "GUILHERME GK"),
             (6, "M", "L", "2302", "SAULO"),
+            (7, "F", "L", "2303", "GUSTAVO OLIVEIRA ANTIGO"),
         ],
     )
     c.executemany(
@@ -36,6 +37,9 @@ def conn(tmp_path):
     )
     c.execute("INSERT INTO match_meta (session_id, vagas_vazias, raw_list) VALUES (1, 2, 'lista')")
     c.execute("INSERT INTO player_alias VALUES ('gustavo', 3)")
+    c.execute("UPDATE player SET canonical_player_id = 4 WHERE id = 7")
+    c.execute("INSERT INTO player_alias VALUES ('gu oliveira antigo', 7)")
+    c.execute("INSERT INTO attendance (player_id, session_id, status) VALUES (7, 2, 'X')")
     c.commit()
     yield c
     c.close()
@@ -74,9 +78,15 @@ def test_find_player_by_id_name_alias_and_ambiguity(conn):
         correction.find_player(conn, 99)
     with pytest.raises(CorrectionError, match="não encontrado"):
         correction.find_player(conn, "Zico")
-    conn.execute("INSERT INTO player (pos, name) VALUES (7, 'Danillo')")
+    conn.execute("INSERT INTO player (pos, name) VALUES (8, 'Danillo')")
     with pytest.raises(CorrectionError, match="ambíguo"):
         correction.find_player(conn, "danillo")
+
+
+def test_find_player_resolves_merged_id_name_and_alias(conn):
+    assert correction.find_player(conn, 7)["id"] == 4
+    assert correction.find_player(conn, "Gustavo Oliveira Antigo")["id"] == 4
+    assert correction.find_player(conn, "Gu Oliveira Antigo")["id"] == 4
 
 
 def test_show_session_orders_by_section(conn):
@@ -111,7 +121,24 @@ def test_relink_moves_attendance_and_learns_alias(conn):
     alias = conn.execute("SELECT player_id FROM player_alias WHERE alias='gustavo'").fetchone()
     assert alias[0] == 4
     # a outra sessão não é afetada
-    assert attendance(conn, "2025-08-28") == {"RODRIGO": ("X", "", "")}
+    assert attendance(conn, "2025-08-28") == {
+        "GUSTAVO OLIVEIRA ANTIGO": ("X", "", ""),
+        "RODRIGO": ("X", "", ""),
+    }
+
+
+def test_relink_to_merged_name_uses_canonical_and_preserves_legacy_duplicate(conn):
+    res = correction.relink(
+        conn, "2025-09-04", "Gustavo Bastos", "Gustavo Oliveira Antigo", alias="Gu Oli"
+    )
+    assert (res.new_player, res.learned_alias) == ("GUSTAVO OLIVEIRA", "gu oli")
+    alias = conn.execute("SELECT player_id FROM player_alias WHERE alias = 'gu oli'").fetchone()
+    assert alias[0] == 4
+    assert attendance(conn, "2025-08-28")["GUSTAVO OLIVEIRA ANTIGO"] == ("X", "", "")
+    rows = exporter.build_rows(conn)
+    body = {r[4]: r for r in rows[5:]}
+    session_column = rows[4].index("28/08/2025")
+    assert body["GUSTAVO OLIVEIRA ANTIGO"][session_column] == "X"
 
 
 def test_relink_rejects_same_target_and_duplicates(conn):
@@ -157,6 +184,14 @@ def test_set_section(conn):
         correction.set_section(conn, "2025-09-04", "Saulo", "banco")
 
 
+def test_status_and_section_accept_merged_name(conn):
+    correction.relink(conn, "2025-09-04", "Gustavo Bastos", "Gustavo Oliveira Antigo")
+    status = correction.set_status(conn, "2025-09-04", "Gustavo Oliveira Antigo", "F")
+    section = correction.set_section(conn, "2025-09-04", "Gu Oliveira Antigo", "reservas")
+    assert (status.player, status.new_status) == ("GUSTAVO OLIVEIRA", "F")
+    assert (section.player, section.new_section) == ("GUSTAVO OLIVEIRA", "reservas")
+
+
 # --- data / local -----------------------------------------------------------------
 
 
@@ -192,8 +227,8 @@ def test_delete_session_requires_confirmation(conn):
     assert (res.date, res.attendance) == ("2025-09-04", 5)
     rows = conn.execute("SELECT ordem, date FROM session").fetchall()
     assert [tuple(r) for r in rows] == [(1, "2025-08-28")]
-    assert conn.execute("SELECT COUNT(*) FROM attendance").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM attendance").fetchone()[0] == 2
     assert conn.execute("SELECT COUNT(*) FROM match_meta").fetchone()[0] == 0
     # jogadores e aliases sobrevivem
-    assert conn.execute("SELECT COUNT(*) FROM player").fetchone()[0] == 6
-    assert conn.execute("SELECT COUNT(*) FROM player_alias").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM player").fetchone()[0] == 7
+    assert conn.execute("SELECT COUNT(*) FROM player_alias").fetchone()[0] == 2
