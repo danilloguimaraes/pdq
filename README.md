@@ -150,6 +150,15 @@ traz anos de histórico, use `--since AAAA-MM` para começar a contabilidade num
 Como a cobrança é derivada, uma correção de partida (`set-status`, `relink`,
 `delete-session`) ajusta o saldo automaticamente; os pagamentos ficam intactos.
 
+## Higiene
+
+`pdq.hygiene.legacy_players` oferece uma consulta somente de leitura para a
+curadoria de jogadores legados (classe vazia ou `-`). Ela conta apenas
+presenças `X` e `J`, aplica um limiar inclusivo configurável e retorna os itens
+por presenças decrescentes, nome normalizado e id. Anotações de padrinho no nome
+e possíveis duplicidades por similaridade são alertas: a consulta não modifica
+`player`, `player_alias` ou `attendance`.
+
 ## Exportação e a inconsistência da planilha
 
 A planilha original tem a fórmula de Presenças por jogador desatualizada
