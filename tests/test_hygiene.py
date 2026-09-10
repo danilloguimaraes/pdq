@@ -79,3 +79,32 @@ def test_links_unique_padrinho_without_changing_name(tmp_path):
         connection.execute("SELECT name, padrinho_id FROM player WHERE id = 2").fetchone()
     ) == (name, 1)
     connection.close()
+
+
+def test_decisions_validate_before_writing_any_link(conn):
+    conn.execute("UPDATE player SET name = 'Zico (AMIGO Carlos)' WHERE id = 3")
+    decisions = [
+        hygiene.PadrinhoDecision(3, 1),
+        hygiene.PadrinhoDecision(2, 99),
+    ]
+
+    with pytest.raises(hygiene.HygieneError, match="padrinho_id 99"):
+        hygiene.apply_padrinho_decisions(conn, decisions)
+
+    assert conn.execute("SELECT padrinho_id FROM player WHERE id = 3").fetchone()[0] is None
+
+
+def test_report_suggests_without_linking(conn):
+    conn.execute("UPDATE player SET name = 'Zico (AMIGO Carlos)' WHERE id = 3")
+
+    report = hygiene.padrinho_report(conn, cutoff=0.6)
+
+    assert report == [
+        hygiene.PadrinhoReview(
+            3,
+            "Zico (AMIGO Carlos)",
+            "Carlos",
+            (hygiene.PadrinhoCandidate(1, "Carlos Silva", 0.667),),
+        )
+    ]
+    assert conn.execute("SELECT padrinho_id FROM player WHERE id = 3").fetchone()[0] is None

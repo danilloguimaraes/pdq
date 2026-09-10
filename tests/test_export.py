@@ -1,7 +1,7 @@
 import subprocess
 import sys
 
-from pdq import exporter, legacy
+from pdq import exporter, hygiene, legacy
 from pdq.validate import diff_rows
 
 
@@ -28,6 +28,16 @@ def test_export_strict_uses_preserved_legacy_fields_only(imported_db, legacy_csv
 
     assert exporter.export_legacy_csv(conn, strict_legacy_quirk=True) == before
     assert before == legacy_csv.read_bytes()
+
+
+def test_export_strict_is_unchanged_after_identity_merge(imported_db, legacy_csv):
+    conn, _ = imported_db
+    source_id, canonical_id = [
+        row["id"] for row in conn.execute("SELECT id FROM player ORDER BY pos LIMIT 2")
+    ]
+    hygiene.merge(conn, canonical_id, source_id)
+
+    assert exporter.export_legacy_csv(conn, strict_legacy_quirk=True) == legacy_csv.read_bytes()
 
 
 def test_export_recomputed_differs_only_in_stale_presencas(imported_db, legacy_csv):

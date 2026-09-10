@@ -34,6 +34,19 @@ mesclagem. A linha legada e seu histórico continuam preservados; aliases,
 sugestões e financeiro resolvem o jogador canônico. A resolução é segura e
 diagnostica cadeia, ciclo, autorreferência ou referência inválida.
 
+**Auditoria de identidade / higiene** (`hygiene-report`):
+Relatório somente de leitura de referências legadas de padrinho e candidatos por
+similaridade. Candidatos nunca criam vínculos ou mesclagens automaticamente.
+
+**Decisão explícita** (`hygiene-apply`):
+Entrada JSON revisada com `player_id` e `padrinho_id`. Sem `--yes` mostra a
+prévia; com `--yes` valida e aplica todo o conjunto numa transação.
+
+**Mesclagem transacional** (`merge`):
+Decisão explícita por IDs de origem e identidade canônica. Preserva a linha e
+presenças legadas, redireciona aliases e pagamentos ao canônico e não altera a
+exportação legada.
+
 **Convidado** (`player.classe = C`, ou `-`/vazio herdado da planilha):
 Quem joga esporadicamente, em geral trazido por um padrinho. Jogadores criados
 pela confirmação nascem com classe `C` e, após a quarta presença (status `X` ou
@@ -172,11 +185,12 @@ histórico de presença sem efeito financeiro.
 | `pdq.backup` | backup e restauração de `data/` |
 | `pdq.whatsapp` | parser puro da lista (sem banco) |
 | `pdq.aliases` | normalização, vínculo exato, sugestões, aprendizado |
+| `pdq.hygiene` | auditoria sugestiva, decisões explícitas de padrinho e mesclagem de identidades |
 | `pdq.postgame` | proposta, JSON, validação e confirmação |
 | `pdq.guest_lifecycle` | fila e decisão transacional de convidados |
 | `pdq.correction` | correção de partida confirmada (vínculo, status, seção, data, local, exclusão) |
 | `pdq.finance` | cobranças derivadas (diária, mensalidade), pagamentos e saldo |
-| `pdq.__main__` | CLI (`propose`, `confirm`, `relink`, `set-status`, `charges`, `pay`, `balance`, ...) |
+| `pdq.__main__` | CLI (`hygiene-report`, `hygiene-apply`, `merge`, `propose`, `confirm`, `relink`, `set-status`, `charges`, `pay`, `balance`, ...) |
 
 ## Decisões
 
