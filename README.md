@@ -25,12 +25,15 @@ python -m pdq --help
 | `pdq backup` | copia `data/` para `backups/<YYYYMMDD-HHMMSS>/` com `manifest.json` (SHA-256) |
 | `pdq restore [DIR]` | recria `data/` a partir de um backup (padrão: o mais recente), conferindo hashes |
 | `pdq verify-backup [DIR]` | confere a integridade de um backup |
+| `pdq hygiene-report [--threshold N]` | lista referências legadas de padrinho e candidatos para revisão, sem alterar o banco |
+| `pdq hygiene-apply DECISOES [--yes]` | mostra ou aplica decisões revisadas de vínculo de padrinho |
 | `pdq propose LISTA [-o ARQ] [--date] [--venue]` | lê a lista do WhatsApp e gera a proposta de presenças (JSON) |
 | `pdq confirm PROPOSTA [--dry-run]` | grava a partida a partir da proposta revisada |
 | `pdq guest-queue` | lista convidados com quatro presenças aguardando decisão |
 | `pdq promote-guest JOGADOR {F,M} DATA` | promove convidado pendente com a data da decisão |
 | `pdq decline-guest JOGADOR DATA {--keep-guest,--leaves}` | registra recusa mantendo o convidado ou sua saída |
 | `pdq show-session DATA` | mostra uma partida gravada e suas presenças |
+| `pdq merge ORIGEM CANONICO` | mescla uma linha legada em uma identidade canônica por IDs explícitos |
 | `pdq relink DATA ERRADO CERTO [--alias GRAFIA]` | troca o jogador vinculado a uma presença |
 | `pdq set-status DATA JOGADOR {X,F,J,-}` | alterna presença / furo / jogou / não jogou |
 | `pdq set-section DATA JOGADOR {goleiros,linha,reservas}` | corrige a seção da lista |

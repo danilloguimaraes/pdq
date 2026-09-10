@@ -15,6 +15,7 @@ from pdq import (
     exporter,
     finance,
     guest_lifecycle,
+    hygiene,
     importer,
     postgame,
     validate,
@@ -65,6 +66,22 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("backup", help="copia data/ para backups/<data-hora>/ com manifest")
     p.add_argument("--data-dir", default="data")
     p.add_argument("--backups-dir", default=str(backup.DEFAULT_BACKUPS_DIR))
+
+    p = sub.add_parser("hygiene-report", help="lista referências legadas de padrinho para revisão")
+    p.add_argument("--threshold", type=float, default=hygiene.DEFAULT_SIMILARITY_CUTOFF)
+    _add_db_arg(p)
+
+    p = sub.add_parser("hygiene-apply", help="mostra ou aplica decisões revisadas de padrinho")
+    p.add_argument("decisions", help="arquivo JSON de decisões ('-' para stdin)")
+    p.add_argument("--yes", action="store_true", help="confirma a gravação das decisões")
+    _add_db_arg(p)
+
+    p = sub.add_parser("merge", help="mescla uma linha legada em uma identidade canônica")
+    p.add_argument("source", metavar="ORIGEM", type=int, help="player_id da linha legada de origem")
+    p.add_argument(
+        "canonical", metavar="CANONICO", type=int, help="player_id da identidade canônica"
+    )
+    _add_db_arg(p)
 
     p = sub.add_parser("restore", help="recria data/ a partir de um backup")
     p.add_argument("backup_dir", nargs="?", help="diretório do backup (padrão: mais recente)")
@@ -306,10 +323,59 @@ def cmd_verify_backup(args) -> int:
     return 0
 
 
+def cmd_hygiene_report(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        reviews = hygiene.padrinho_report(conn, cutoff=args.threshold)
+    except hygiene.HygieneError as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    print(hygiene.render_padrinho_report(reviews))
+    return 0
+
+
 def _read_text(path: str) -> str:
     if path == "-":
         return sys.stdin.read()
     return Path(path).read_text(encoding="utf-8")
+
+
+def cmd_hygiene_apply(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        decisions = hygiene.decisions_from_json(_read_text(args.decisions))
+        links = hygiene.validate_padrinho_decisions(conn, decisions)
+        for link in links:
+            print(f"  {link.player_name} [{link.player_id}] -> padrinho [{link.padrinho_id}]")
+        if not args.yes:
+            print("nada aplicado: repita com --yes para confirmar", file=sys.stderr)
+            return 1
+        hygiene.apply_padrinho_decisions(conn, decisions)
+    except (OSError, hygiene.HygieneError) as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    print(f"{len(links)} vínculo(s) de padrinho aplicado(s)")
+    return 0
+
+
+def cmd_merge(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        evidence = hygiene.merge(conn, args.source, args.canonical)
+    except hygiene.HygieneError as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    print(
+        f"{evidence.source_name} [{evidence.source_id}] mesclado em "
+        f"{evidence.canonical_name} [{evidence.canonical_id}]"
+    )
+    return 0
 
 
 def cmd_propose(args) -> int:
@@ -617,6 +683,9 @@ COMMANDS = {
     "export-legacy": cmd_export_legacy,
     "validate-legacy": cmd_validate_legacy,
     "backup": cmd_backup,
+    "hygiene-report": cmd_hygiene_report,
+    "hygiene-apply": cmd_hygiene_apply,
+    "merge": cmd_merge,
     "restore": cmd_restore,
     "verify-backup": cmd_verify_backup,
     "propose": cmd_propose,
