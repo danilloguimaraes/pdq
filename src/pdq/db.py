@@ -14,7 +14,8 @@ Versões do schema (PRAGMA user_version):
      player.guest_status e guest_decision_date). Aditiva e idempotente; a
      guarda de migração verifica as duas épicas, pois foram desenvolvidas em
      paralelo sob o mesmo número.
-- 5: higiene E3 (player.padrinho_id, vínculo estruturado ao padrinho).
+ - 5: higiene E3 (player.padrinho_id, vínculo estruturado ao padrinho).
+ - 6: identidade canônica (player.canonical_player_id).
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ SECTION_FIELD = "linha"
 SECTION_RESERVES = "reservas"
 SECTIONS = (SECTION_GOALKEEPERS, SECTION_FIELD, SECTION_RESERVES)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 CLASS_GUEST = "C"
 CLASS_FREQUENT = "F"
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS player (
     name     TEXT    NOT NULL,             -- JOGADORES (preservado byte a byte)
     padrinho TEXT    NOT NULL DEFAULT '',  -- texto histórico de quem apresentou
     padrinho_id INTEGER REFERENCES player(id) ON DELETE SET NULL,
+    canonical_player_id INTEGER REFERENCES player(id) ON DELETE SET NULL,
     guest_status TEXT NOT NULL DEFAULT '' CHECK (guest_status IN
         ('', 'pending', 'promoted', 'declined_stays', 'declined_leaves')),
     guest_decision_date TEXT NOT NULL DEFAULT ''
@@ -158,6 +160,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         and _table_sql(conn, "payment")
         and {"guest_status", "guest_decision_date"} <= _columns(conn, "player")
         and "padrinho_id" in _columns(conn, "player")
+        and "canonical_player_id" in _columns(conn, "player")
     ):
         return
 
@@ -168,6 +171,11 @@ def migrate(conn: sqlite3.Connection) -> None:
     if "padrinho_id" not in _columns(conn, "player"):
         conn.execute(
             "ALTER TABLE player ADD COLUMN padrinho_id INTEGER "
+            "REFERENCES player(id) ON DELETE SET NULL"
+        )
+    if "canonical_player_id" not in _columns(conn, "player"):
+        conn.execute(
+            "ALTER TABLE player ADD COLUMN canonical_player_id INTEGER "
             "REFERENCES player(id) ON DELETE SET NULL"
         )
 

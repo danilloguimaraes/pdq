@@ -200,6 +200,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_db_arg(p)
 
     p = sub.add_parser(
+        "merge",
+        help="mescla uma linha legada em uma identidade canônica",
+        description=(
+            "Preserva presenças e a linha legada de ORIGEM, mas passa seus aliases para "
+            "CANONICO. Ambos os argumentos devem ser player_id explícitos."
+        ),
+    )
+    p.add_argument("source", metavar="ORIGEM", type=int, help="player_id da linha a mesclar")
+    p.add_argument(
+        "canonical", metavar="CANONICO", type=int, help="player_id da identidade canônica"
+    )
+    _add_db_arg(p)
+
+    p = sub.add_parser(
         "relink",
         help="troca o jogador vinculado a uma presença",
         description=(
@@ -598,7 +612,7 @@ def _correct(args, fn):
     conn = db.connect(args.db)
     try:
         return fn(conn)
-    except correction.CorrectionError as e:
+    except (correction.CorrectionError, hygiene.HygieneError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
     finally:
@@ -608,6 +622,21 @@ def _correct(args, fn):
 def cmd_show_session(args) -> int:
     def run(conn):
         print(correction.render_session(correction.show_session(conn, args.date)))
+        return 0
+
+    return _correct(args, run)
+
+
+def cmd_merge(args) -> int:
+    def run(conn):
+        res = hygiene.merge(conn, args.source, args.canonical)
+        print(
+            f"mescla: {res.source_name} [{res.source_id}] -> "
+            f"{res.canonical_name} [{res.canonical_id}]"
+        )
+        print(f"  presenças legadas preservadas: {res.attendance_count}")
+        print(f"  aliases redirecionados: {', '.join(res.redirected_aliases) or 'nenhum'}")
+        print(f"  aliases aprendidos: {', '.join(res.learned_aliases) or 'nenhum'}")
         return 0
 
     return _correct(args, run)
@@ -693,6 +722,7 @@ COMMANDS = {
     "promote-guest": cmd_promote_guest,
     "decline-guest": cmd_decline_guest,
     "show-session": cmd_show_session,
+    "merge": cmd_merge,
     "relink": cmd_relink,
     "set-status": cmd_set_status,
     "set-section": cmd_set_section,
