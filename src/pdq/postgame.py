@@ -287,9 +287,17 @@ def confirm(conn: sqlite3.Connection, proposal: Proposal) -> ConfirmResult:
             if e.action == ACTION_CREATE:
                 np = e.new_player
                 cur = conn.execute(
-                    "INSERT INTO player (pos, classe, posicao, legacy_id, name, padrinho) VALUES "
-                    "((SELECT COALESCE(MAX(pos), 0) + 1 FROM player), '', ?, ?, ?, ?)",
-                    (np.posicao, d.strftime("%y%m"), np.name.strip(), np.padrinho.strip()),
+                    "INSERT INTO player "
+                    "(pos, classe, posicao, legacy_id, name, padrinho, guest_status) VALUES "
+                    "((SELECT COALESCE(MAX(pos), 0) + 1 FROM player), ?, ?, ?, ?, ?, ?)",
+                    (
+                        db.CLASS_GUEST,
+                        np.posicao,
+                        d.strftime("%y%m"),
+                        np.name.strip(),
+                        np.padrinho.strip(),
+                        db.GUEST_PENDING,
+                    ),
                 )
                 pid = cur.lastrowid
                 created.append(np.name.strip())
